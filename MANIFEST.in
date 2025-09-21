@@ -1,0 +1,12 @@
+include README.md
+include LICENSE
+include pyproject.toml
+include poetry.lock
+include .env.example
+include src/simple_or_agent/README.md
+recursive-include src/simple_or_agent *.py
+recursive-include examples *.py
+recursive-include tests *.py
+recursive-exclude tests __pycache__
+recursive-exclude examples __pycache__
+recursive-exclude src __pycache__

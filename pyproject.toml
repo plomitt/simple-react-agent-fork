@@ -22,6 +22,7 @@ dependencies = [
 ]
 
 [tool.poetry]
+package-mode = true
 packages = [{include = "simple_or_agent", from = "src"}]
 
 
