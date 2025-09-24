@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from instructor import Mode
 from pydantic import BaseModel
+from dotenv import load_dotenv
 
 from simple_or_agent.instructor_based.prompt_manager import (
     DEFAULT_REACT_SYSTEM_PROMPT_TEMPLATE,
@@ -29,6 +30,8 @@ from simple_or_agent.instructor_based import openrouter_client
 from simple_or_agent.instructor_based.calculator_tool import build_calculator_tool
 from simple_or_agent.instructor_based.provider_profiles import resolve_profile
 from simple_or_agent.instructor_based.tools import ToolRegistry, ToolSpec
+
+load_dotenv()
 
 def _resolve_api_key() -> Optional[str]:
     """Read the preferred API key from the environment."""
@@ -74,7 +77,7 @@ class ThinkResponse(BaseModel):
 
 class ObservationResponse(BaseModel):
     """Observation response"""
-    observation: str
+    content: str
 
 class ReActAgent:
     """Minimal ReAct loop that works."""
@@ -171,13 +174,13 @@ class ReActAgent:
     def think(self) -> ThinkResponse:
 
         print(f"Thinking about the current user question or observation.")
-        print(f"Messages: {self.messages}")
-        self.messages.append({
-            "role": "user",
-            "content": (
-                "Think about current user question or last observation and plan next steps. We have following tools available: " + ", ".join(self._tools.tool_names()) + ". Do you need to call any tool on next step or do you have the answer already? Respond using ThinkResponse. You are allowed to call ThinkResponse only once. You will be allowed to call available tools on next step."
-            ),
-        })
+        # print(f"Messages: {self.messages}")
+        # self.messages.append({
+        #     "role": "user",
+        #     "content": (
+        #         "Think about current user question or last observation and plan next steps. We have following tools available: " + ", ".join(self._tools.tool_names()) + ". Do you need to call any tool on next step or do you have the answer already? Respond using ThinkResponse. You are allowed to call ThinkResponse only once. You will be allowed to call available tools on next step."
+        #     ),
+        # })
         return self.client.chat.completions.create(
             model=self.model_id,
             messages=self.messages,
@@ -189,7 +192,7 @@ class ReActAgent:
             raise RuntimeError("No tools registered for this agent")
 
         print(f"Actioning the current user question or observation.")
-        print(f"Messages: {self.messages}")
+        # print(f"Messages: {self.messages}")
 
         self.messages.append({
             "role": "user",
@@ -205,7 +208,7 @@ class ReActAgent:
             response_model=available_tool_response_models,
         )
 
-        print(f"Action response: {response}")
+        # print(f"Action response: {response}")
 
         # Identify which tool the language model implied by checking the response type.
         tool_name, spec = self._tools.resolve(response)
@@ -215,7 +218,7 @@ class ReActAgent:
     def observation(self) -> ObservationResponse:
 
         print(f"Observing the current user question or observation.")
-        print(f"Messages: {self.messages}")
+        # print(f"Messages: {self.messages}")
 
         self.messages.append({
             "role": "user",
@@ -223,11 +226,13 @@ class ReActAgent:
                 "Review the latest tool result and explain what it means."
             ),
         })
-        return self.client.chat.completions.create(
+        response = self.client.chat.completions.create(
             model=self.model_id,
             messages=self.messages,
             response_model=ObservationResponse,
         )
+
+        return response.content
 
     def run(self, prompt: str) -> str:
         """Run the ReAct loop until we reach a final answer or max steps."""
@@ -238,11 +243,18 @@ class ReActAgent:
 
         self.messages.append({"role": "user", "content": prompt})
 
+        iteration_messages = []
+        iteration_messages.append(f'User: {prompt}\n')
+
         for _ in range(self.max_steps):
+            self.messages = []
+            self._refresh_system_prompt()
+            self.messages.append({"role": "user", "content": "".join(iteration_messages) + "\n\n" + "Think about current user question or last observation and plan next steps. We have following tools available: " + ", ".join(self._tools.tool_names()) + ". Do you need to call any tool on next step or do you have the answer already? Respond using ThinkResponse. You are allowed to call ThinkResponse only once. You will be allowed to call available tools on next step."})
+
             # ReAct step order: Thought -> Action -> Observation.
             think_response = self.think()
 
-            print(f"Think response: {think_response}")
+            # print(f"Think response: {think_response}")
 
             if think_response.is_final:
                 final_answer = think_response.thoughts
@@ -256,17 +268,30 @@ class ReActAgent:
 
             tool_name, tool_spec, action_payload = self.action()
             payload_dict = action_payload.model_dump()
-            self.messages.append({"role": "assistant", "content": f"Action: {tool_name} -> {payload_dict}"})
+            func_result = tool_spec.handler(payload_dict)
+            self.messages.append({"role": "assistant", "content": f"Action: {tool_name} -> {func_result}"})
+            print(f'Tool name: {tool_name}')
+            print(f'Func result: {func_result}')
 
-            observation_response = self.observation()
-            self.messages.append({"role": "assistant", "content": "Observation: " + observation_response.observation})
+            observation = self.observation()
+            self.messages.append({"role": "assistant", "content": "Observation: " + observation})
+            
+            iteration_messages.append(f'Thought: {think_response.thoughts}\n')
+            iteration_messages.append(f'Action: {tool_name} -> {func_result}\n')
+            iteration_messages.append(f'Observation: {observation}\n')
+
 
         raise RuntimeError("Reached max steps without a final answer")
 
 
 if __name__ == "__main__":
     # Set the OpenRouter API key in the environment before running this quick demo.
-    agent = ReActAgent()
+    agent = ReActAgent(model='qwen/qwen3-30b-a3b-instruct-2507')
     agent.add_tool(build_calculator_tool())
-    agent.run("Find the exact value of log(1234234)")
-    print(agent.messages)   
+    answer = agent.run("Find the exact value of '((7 * (3 + 5) - (12 / 4)) * (2 ** 3) + (19 - (6 * 2))) / (4 + (15 - 13) * 2)'")
+    # answer = agent.run("Find the exact value of log(1234234)")
+    print('Answer', '='*50)
+    print(answer)
+    print('Messages', '='*50)
+    for i in range(len(agent.messages)):
+        print(f'{i}: {agent.messages[i]}')
