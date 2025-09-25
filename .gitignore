@@ -85,3 +85,6 @@ pip-wheel-metadata/
 AGENTS.md
 .serena/
 .claude/
+
+# LEANN
+/leann_index

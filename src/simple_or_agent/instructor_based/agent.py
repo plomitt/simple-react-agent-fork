@@ -3,25 +3,15 @@
 # Exists to offer a minimal OpenRouter-friendly orchestrator in this codebase.
 # RELEVANT FILES: src/simple_or_agent/instructor_based/openrouter_client.py, src/simple_or_agent/instructor_based/provider_profiles.py, src/simple_or_agent/instructor_based/calculator_tool.py
 
+from typing import Any, Dict, List, Optional, Tuple
 from __future__ import annotations
-
+from dotenv import load_dotenv
+from pydantic import BaseModel
+from instructor import Mode
 from pathlib import Path
 import sys
 
-if __package__ in {None, ''}:
-    # Ensure direct execution can resolve the src/ package namespace.
-    project_src = Path(__file__).resolve().parent.parent.parent
-    if str(project_src) not in sys.path:
-        sys.path.insert(0, str(project_src))
-
 from simple_or_agent.instructor_based import simple_client
-
-from typing import Any, Dict, List, Optional, Tuple
-
-from instructor import Mode
-from pydantic import BaseModel
-from dotenv import load_dotenv
-
 from simple_or_agent.instructor_based.prompt_manager import (
     DEFAULT_REACT_SYSTEM_PROMPT_TEMPLATE,
     render_system_prompt,
@@ -30,6 +20,13 @@ from simple_or_agent.instructor_based import openrouter_client
 from simple_or_agent.instructor_based.calculator_tool import build_calculator_tool
 from simple_or_agent.instructor_based.provider_profiles import resolve_profile
 from simple_or_agent.instructor_based.tools import ToolRegistry, ToolSpec
+from simple_or_agent.tools import *
+
+if __package__ in {None, ''}:
+    # Ensure direct execution can resolve the src/ package namespace.
+    project_src = Path(__file__).resolve().parent.parent.parent
+    if str(project_src) not in sys.path:
+        sys.path.insert(0, str(project_src))
 
 load_dotenv()
 
@@ -49,7 +46,6 @@ def _derive_model_id(model: Optional[str], provider_id: Optional[str]) -> str:
         return provider_id
     return "qwen/qwen3-next-80b-a3b-instruct"
 
-
 def _build_client(
     api_key: str,
     provider_id: str,
@@ -61,7 +57,6 @@ def _build_client(
         provider_id=provider_id,
         mode=mode,
     )
-
 
 def _build_simple_client(
     api_key: str,
@@ -174,13 +169,6 @@ class ReActAgent:
     def think(self) -> ThinkResponse:
 
         print(f"Thinking about the current user question or observation.")
-        # print(f"Messages: {self.messages}")
-        # self.messages.append({
-        #     "role": "user",
-        #     "content": (
-        #         "Think about current user question or last observation and plan next steps. We have following tools available: " + ", ".join(self._tools.tool_names()) + ". Do you need to call any tool on next step or do you have the answer already? Respond using ThinkResponse. You are allowed to call ThinkResponse only once. You will be allowed to call available tools on next step."
-        #     ),
-        # })
         return self.client.chat.completions.create(
             model=self.model_id,
             messages=self.messages,
@@ -287,9 +275,30 @@ class ReActAgent:
 if __name__ == "__main__":
     # Set the OpenRouter API key in the environment before running this quick demo.
     agent = ReActAgent(model='qwen/qwen3-30b-a3b-instruct-2507')
-    agent.add_tool(build_calculator_tool())
-    answer = agent.run("Find the exact value of '((7 * (3 + 5) - (12 / 4)) * (2 ** 3) + (19 - (6 * 2))) / (4 + (15 - 13) * 2)'")
-    # answer = agent.run("Find the exact value of log(1234234)")
+
+    # Declarative toolkit instantiation and tool registration
+    toolkits = [
+        VectorIndexToolkit(),
+        MathsToolkit(),
+        WikiToolkit(),
+        MetaSearchToolkit(),
+        WebSearchToolkit(),
+        DatabaseToolkit(),
+    ]
+
+    # Register all tools from all toolkits by calling factory functions
+    for toolkit in toolkits:
+        for tool in toolkit:
+            agent.add_tool(tool)
+
+    print(f"Registered {len(agent._tools.tool_names())} tools from {len(toolkits)} toolkits")
+
+    # Example queries using the registered tools
+    # answer = agent.run("Find the exact value of '((7 * (3 + 5) - (12 / 4)) * (2 ** 3) + (19 - (6 * 2))) / (4 + (15 - 13) * 2)'")
+    # answer = agent.run("Search for information about artificial intelligence")
+    # answer = agent.run("Find Wikipedia information about Python programming")
+
+    answer = agent.run("List all tools available to you.")
     print('Answer', '='*50)
     print(answer)
     print('Messages', '='*50)
