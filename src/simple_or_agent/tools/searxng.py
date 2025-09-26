@@ -5,10 +5,17 @@ import aiohttp
 import asyncio
 import json
 import os
+from pydantic import BaseModel, Field
 
 from simple_or_agent.instructor_based.tools import ToolSpec
 
 load_dotenv()
+
+class SearXNGSearchArgs(BaseModel):
+    """Inputs for the SearXNG search tool."""
+    queries: List[str] = Field(..., description="List of search queries to execute.")
+    category: Optional[str] = Field(None, description="Optional category to filter search results (e.g., 'news', 'images', 'videos').")
+    max_results: int = Field(10, description="Maximum number of results to return per query (default: 10).")
 
 async def fetch_search_results(
     session: aiohttp.ClientSession,
@@ -183,12 +190,9 @@ def make_searxng_search_tool() -> ToolSpec:
 
     def handler(args: Dict[str, Any]) -> Any:
         try:
-            queries = args["queries"]
-            category = args.get("category")
-            max_results = args.get("max_results", 10)
-
+            parsed_args = SearXNGSearchArgs(**args)
             base_url = os.getenv("SEARXNG_BASE_URL", "http://localhost:8080")
-            results = searxng_search(queries, base_url, category, max_results)
+            results = searxng_search(parsed_args.queries, base_url, parsed_args.category, parsed_args.max_results)
             return results
         except Exception as e:
             return {"error": f"searxng_search failed: {e}"}
@@ -196,25 +200,12 @@ def make_searxng_search_tool() -> ToolSpec:
     return ToolSpec(
         name="searxng_search",
         description="Performs web search using SearXNG with support for multiple queries and categories.",
+        args_model=SearXNGSearchArgs,
         handler=handler,
         parameters={
-            "type": "object",
-            "properties": {
-                "queries": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "List of search queries to execute."
-                },
-                "category": {
-                    "type": "string",
-                    "description": "Optional category to filter search results (e.g., 'news', 'images', 'videos')."
-                },
-                "max_results": {
-                    "type": "integer",
-                    "description": "Maximum number of results to return per query (default: 10)."
-                }
-            },
-            "required": ["queries"],
+            "queries": "list of search queries to execute",
+            "category": "optional category to filter search results (e.g., 'news', 'images', 'videos')",
+            "max_results": "maximum number of results to return per query (default: 10)",
         },
     )
 

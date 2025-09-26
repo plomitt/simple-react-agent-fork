@@ -1,8 +1,9 @@
 from dotenv import load_dotenv
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from bson import ObjectId
 import pymongo
 import os
+from pydantic import BaseModel, Field
 
 from simple_or_agent.instructor_based.tools import ToolSpec
 
@@ -10,6 +11,65 @@ from simple_or_agent.instructor_based.tools import ToolSpec
 
 load_dotenv()
 mongo_client: pymongo.MongoClient = pymongo.MongoClient(os.getenv("MONGO_URI", "mongodb://localhost:27017"))
+
+# --- Args Models ---
+
+class MongoInsertOneArgs(BaseModel):
+    """Inputs for the MongoDB insert_one tool."""
+    db_name: str = Field(..., description="The name of the database.")
+    collection_name: str = Field(..., description="The name of the collection.")
+    document: Dict[str, Any] = Field(..., description="The JSON document to insert.")
+
+class MongoFindOneArgs(BaseModel):
+    """Inputs for the MongoDB find_one tool."""
+    db_name: str = Field(..., description="The name of the database.")
+    collection_name: str = Field(..., description="The name of the collection.")
+    filter: Optional[Dict[str, Any]] = Field(None, description="A JSON object to filter the query.")
+
+class MongoUpdateOneArgs(BaseModel):
+    """Inputs for the MongoDB update_one tool."""
+    db_name: str = Field(..., description="The name of the database.")
+    collection_name: str = Field(..., description="The name of the collection.")
+    filter: Dict[str, Any] = Field(..., description="A JSON object to select the document to update.")
+    update: Dict[str, Any] = Field(..., description="A JSON object specifying the update operations (e.g., using $set).")
+
+class MongoDeleteOneArgs(BaseModel):
+    """Inputs for the MongoDB delete_one tool."""
+    db_name: str = Field(..., description="The name of the database.")
+    collection_name: str = Field(..., description="The name of the collection.")
+    filter: Dict[str, Any] = Field(..., description="A JSON object to select the document to delete.")
+
+class MongoFindArgs(BaseModel):
+    """Inputs for the MongoDB find tool."""
+    db_name: str = Field(..., description="The name of the database.")
+    collection_name: str = Field(..., description="The name of the collection.")
+    filter: Optional[Dict[str, Any]] = Field(None, description="A JSON object to filter the query.")
+    limit: int = Field(25, description="The maximum number of documents to return.")
+
+class MongoAggregateArgs(BaseModel):
+    """Inputs for the MongoDB aggregate tool."""
+    db_name: str = Field(..., description="The name of the database.")
+    collection_name: str = Field(..., description="The name of the collection.")
+    pipeline: list = Field(..., description="A list of JSON objects representing the aggregation stages.")
+
+class MongoCountDocumentsArgs(BaseModel):
+    """Inputs for the MongoDB count_documents tool."""
+    db_name: str = Field(..., description="The name of the database.")
+    collection_name: str = Field(..., description="The name of the collection.")
+    filter: Optional[Dict[str, Any]] = Field(None, description="A JSON object to filter the documents to be counted.")
+
+class MongoListCollectionsArgs(BaseModel):
+    """Inputs for the MongoDB list_collections tool."""
+    db_name: str = Field(..., description="The name of the database to inspect.")
+
+class MongoDropCollectionArgs(BaseModel):
+    """Inputs for the MongoDB drop_collection tool."""
+    db_name: str = Field(..., description="The name of the database.")
+    collection_name: str = Field(..., description="The name of the collection to drop.")
+
+class MongoListDatabasesResponse(BaseModel):
+    """Response from the MongoDB list_databases tool."""
+    databases: list = Field(..., description="List of database names")
 
 def _serialize_doc(doc: Any) -> Any:
     """Recursively convert ObjectId to string for JSON serialization."""
@@ -28,9 +88,10 @@ def make_mongo_insert_one_tool() -> ToolSpec:
 
     def handler(args: Dict[str, Any]) -> Any:
         try:
-            db = mongo_client[args["db_name"]]
-            collection = db[args["collection_name"]]
-            result = collection.insert_one(args["document"])
+            parsed_args = MongoInsertOneArgs(**args)
+            db = mongo_client[parsed_args.db_name]
+            collection = db[parsed_args.collection_name]
+            result = collection.insert_one(parsed_args.document)
             return {"inserted_id": str(result.inserted_id)}
         except Exception as e:
             return {"error": f"mongo_insert_one failed: {e}"}
@@ -38,15 +99,12 @@ def make_mongo_insert_one_tool() -> ToolSpec:
     return ToolSpec(
         name="mongo_insert_one",
         description="Inserts a single document into a specified MongoDB collection.",
+        args_model=MongoInsertOneArgs,
         handler=handler,
         parameters={
-            "type": "object",
-            "properties": {
-                "db_name": {"type": "string", "description": "The name of the database."},
-                "collection_name": {"type": "string", "description": "The name of the collection."},
-                "document": {"type": "object", "description": "The JSON document to insert."},
-            },
-            "required": ["db_name", "collection_name", "document"],
+            "db_name": "the name of the database",
+            "collection_name": "the name of the collection",
+            "document": "the JSON document to insert",
         },
     )
 
@@ -55,9 +113,10 @@ def make_mongo_find_one_tool() -> ToolSpec:
 
     def handler(args: Dict[str, Any]) -> Any:
         try:
-            db = mongo_client[args["db_name"]]
-            collection = db[args["collection_name"]]
-            doc = collection.find_one(args.get("filter", {}))
+            parsed_args = MongoFindOneArgs(**args)
+            db = mongo_client[parsed_args.db_name]
+            collection = db[parsed_args.collection_name]
+            doc = collection.find_one(parsed_args.filter or {})
             return _serialize_doc(doc) if doc else None
         except Exception as e:
             return {"error": f"mongo_find_one failed: {e}"}
@@ -65,15 +124,12 @@ def make_mongo_find_one_tool() -> ToolSpec:
     return ToolSpec(
         name="mongo_find_one",
         description="Finds a single document in a collection that matches the filter.",
+        args_model=MongoFindOneArgs,
         handler=handler,
         parameters={
-            "type": "object",
-            "properties": {
-                "db_name": {"type": "string", "description": "The name of the database."},
-                "collection_name": {"type": "string", "description": "The name of the collection."},
-                "filter": {"type": "object", "description": "A JSON object to filter the query."},
-            },
-            "required": ["db_name", "collection_name"],
+            "db_name": "the name of the database",
+            "collection_name": "the name of the collection",
+            "filter": "a JSON object to filter the query",
         },
     )
 
@@ -82,9 +138,10 @@ def make_mongo_update_one_tool() -> ToolSpec:
 
     def handler(args: Dict[str, Any]) -> Any:
         try:
-            db = mongo_client[args["db_name"]]
-            collection = db[args["collection_name"]]
-            result = collection.update_one(args["filter"], args["update"])
+            parsed_args = MongoUpdateOneArgs(**args)
+            db = mongo_client[parsed_args.db_name]
+            collection = db[parsed_args.collection_name]
+            result = collection.update_one(parsed_args.filter, parsed_args.update)
             return {
                 "matched_count": result.matched_count,
                 "modified_count": result.modified_count,
@@ -95,16 +152,13 @@ def make_mongo_update_one_tool() -> ToolSpec:
     return ToolSpec(
         name="mongo_update_one",
         description="Updates a single document matching the filter in a collection.",
+        args_model=MongoUpdateOneArgs,
         handler=handler,
         parameters={
-            "type": "object",
-            "properties": {
-                "db_name": {"type": "string", "description": "The name of the database."},
-                "collection_name": {"type": "string", "description": "The name of the collection."},
-                "filter": {"type": "object", "description": "A JSON object to select the document to update."},
-                "update": {"type": "object", "description": "A JSON object specifying the update operations (e.g., using $set)."},
-            },
-            "required": ["db_name", "collection_name", "filter", "update"],
+            "db_name": "the name of the database",
+            "collection_name": "the name of the collection",
+            "filter": "a JSON object to select the document to update",
+            "update": "a JSON object specifying the update operations (e.g., using $set)",
         },
     )
     
@@ -113,9 +167,10 @@ def make_mongo_delete_one_tool() -> ToolSpec:
 
     def handler(args: Dict[str, Any]) -> Any:
         try:
-            db = mongo_client[args["db_name"]]
-            collection = db[args["collection_name"]]
-            result = collection.delete_one(args["filter"])
+            parsed_args = MongoDeleteOneArgs(**args)
+            db = mongo_client[parsed_args.db_name]
+            collection = db[parsed_args.collection_name]
+            result = collection.delete_one(parsed_args.filter)
             return {"deleted_count": result.deleted_count}
         except Exception as e:
             return {"error": f"mongo_delete_one failed: {e}"}
@@ -123,15 +178,12 @@ def make_mongo_delete_one_tool() -> ToolSpec:
     return ToolSpec(
         name="mongo_delete_one",
         description="Deletes a single document matching the filter from a collection.",
+        args_model=MongoDeleteOneArgs,
         handler=handler,
         parameters={
-            "type": "object",
-            "properties": {
-                "db_name": {"type": "string", "description": "The name of the database."},
-                "collection_name": {"type": "string", "description": "The name of the collection."},
-                "filter": {"type": "object", "description": "A JSON object to select the document to delete."},
-            },
-            "required": ["db_name", "collection_name", "filter"],
+            "db_name": "the name of the database",
+            "collection_name": "the name of the collection",
+            "filter": "a JSON object to select the document to delete",
         },
     )
 
@@ -142,10 +194,10 @@ def make_mongo_find_tool() -> ToolSpec:
 
     def handler(args: Dict[str, Any]) -> Any:
         try:
-            db = mongo_client[args["db_name"]]
-            collection = db[args["collection_name"]]
-            limit = args.get("limit", 25) # Default limit to prevent huge outputs
-            cursor = collection.find(args.get("filter", {})).limit(limit)
+            parsed_args = MongoFindArgs(**args)
+            db = mongo_client[parsed_args.db_name]
+            collection = db[parsed_args.collection_name]
+            cursor = collection.find(parsed_args.filter or {}).limit(parsed_args.limit)
             return [_serialize_doc(doc) for doc in cursor]
         except Exception as e:
             return {"error": f"mongo_find failed: {e}"}
@@ -153,16 +205,13 @@ def make_mongo_find_tool() -> ToolSpec:
     return ToolSpec(
         name="mongo_find",
         description="Finds multiple documents in a collection that match the filter. Returns up to 25 documents by default.",
+        args_model=MongoFindArgs,
         handler=handler,
         parameters={
-            "type": "object",
-            "properties": {
-                "db_name": {"type": "string", "description": "The name of the database."},
-                "collection_name": {"type": "string", "description": "The name of the collection."},
-                "filter": {"type": "object", "description": "A JSON object to filter the query."},
-                "limit": {"type": "integer", "description": "The maximum number of documents to return."},
-            },
-            "required": ["db_name", "collection_name"],
+            "db_name": "the name of the database",
+            "collection_name": "the name of the collection",
+            "filter": "a JSON object to filter the query",
+            "limit": "the maximum number of documents to return",
         },
     )
 
@@ -171,10 +220,10 @@ def make_mongo_aggregate_tool() -> ToolSpec:
 
     def handler(args: Dict[str, Any]) -> Any:
         try:
-            db = mongo_client[args["db_name"]]
-            collection = db[args["collection_name"]]
-            pipeline = args["pipeline"]
-            cursor = collection.aggregate(pipeline)
+            parsed_args = MongoAggregateArgs(**args)
+            db = mongo_client[parsed_args.db_name]
+            collection = db[parsed_args.collection_name]
+            cursor = collection.aggregate(parsed_args.pipeline)
             return [_serialize_doc(doc) for doc in cursor]
         except Exception as e:
             return {"error": f"mongo_aggregate failed: {e}"}
@@ -182,15 +231,12 @@ def make_mongo_aggregate_tool() -> ToolSpec:
     return ToolSpec(
         name="mongo_aggregate",
         description="Performs complex data aggregation using a pipeline of stages.",
+        args_model=MongoAggregateArgs,
         handler=handler,
         parameters={
-            "type": "object",
-            "properties": {
-                "db_name": {"type": "string", "description": "The name of the database."},
-                "collection_name": {"type": "string", "description": "The name of the collection."},
-                "pipeline": {"type": "array", "description": "A list of JSON objects representing the aggregation stages."},
-            },
-            "required": ["db_name", "collection_name", "pipeline"],
+            "db_name": "the name of the database",
+            "collection_name": "the name of the collection",
+            "pipeline": "a list of JSON objects representing the aggregation stages",
         },
     )
 
@@ -199,9 +245,10 @@ def make_mongo_count_documents_tool() -> ToolSpec:
 
     def handler(args: Dict[str, Any]) -> Any:
         try:
-            db = mongo_client[args["db_name"]]
-            collection = db[args["collection_name"]]
-            count = collection.count_documents(args.get("filter", {}))
+            parsed_args = MongoCountDocumentsArgs(**args)
+            db = mongo_client[parsed_args.db_name]
+            collection = db[parsed_args.collection_name]
+            count = collection.count_documents(parsed_args.filter or {})
             return {"count": count}
         except Exception as e:
             return {"error": f"mongo_count_documents failed: {e}"}
@@ -209,15 +256,12 @@ def make_mongo_count_documents_tool() -> ToolSpec:
     return ToolSpec(
         name="mongo_count_documents",
         description="Counts the number of documents in a collection that match the given filter.",
+        args_model=MongoCountDocumentsArgs,
         handler=handler,
         parameters={
-            "type": "object",
-            "properties": {
-                "db_name": {"type": "string", "description": "The name of the database."},
-                "collection_name": {"type": "string", "description": "The name of the collection."},
-                "filter": {"type": "object", "description": "A JSON object to filter the documents to be counted."},
-            },
-            "required": ["db_name", "collection_name"],
+            "db_name": "the name of the database",
+            "collection_name": "the name of the collection",
+            "filter": "a JSON object to filter the documents to be counted",
         },
     )
 
@@ -235,8 +279,9 @@ def make_mongo_list_databases_tool() -> ToolSpec:
     return ToolSpec(
         name="mongo_list_databases",
         description="Lists the names of all databases on the MongoDB server.",
+        response_model=MongoListDatabasesResponse,
         handler=handler,
-        parameters={"type": "object", "properties": {}},
+        parameters={},
     )
 
 def make_mongo_list_collections_tool() -> ToolSpec:
@@ -244,7 +289,8 @@ def make_mongo_list_collections_tool() -> ToolSpec:
 
     def handler(args: Dict[str, Any]) -> Any:
         try:
-            db = mongo_client[args["db_name"]]
+            parsed_args = MongoListCollectionsArgs(**args)
+            db = mongo_client[parsed_args.db_name]
             return {"collections": db.list_collection_names()}
         except Exception as e:
             return {"error": f"mongo_list_collections failed: {e}"}
@@ -252,13 +298,10 @@ def make_mongo_list_collections_tool() -> ToolSpec:
     return ToolSpec(
         name="mongo_list_collections",
         description="Lists the names of all collections within a specified database.",
+        args_model=MongoListCollectionsArgs,
         handler=handler,
         parameters={
-            "type": "object",
-            "properties": {
-                "db_name": {"type": "string", "description": "The name of the database to inspect."},
-            },
-            "required": ["db_name"],
+            "db_name": "the name of the database to inspect",
         },
     )
 
@@ -267,23 +310,21 @@ def make_mongo_drop_collection_tool() -> ToolSpec:
 
     def handler(args: Dict[str, Any]) -> Any:
         try:
-            db = mongo_client[args["db_name"]]
-            db.drop_collection(args["collection_name"])
-            return {"message": f"Collection '{args['collection_name']}' dropped successfully from database '{args['db_name']}'."}
+            parsed_args = MongoDropCollectionArgs(**args)
+            db = mongo_client[parsed_args.db_name]
+            db.drop_collection(parsed_args.collection_name)
+            return {"message": f"Collection '{parsed_args.collection_name}' dropped successfully from database '{parsed_args.db_name}'."}
         except Exception as e:
             return {"error": f"mongo_drop_collection failed: {e}"}
 
     return ToolSpec(
         name="mongo_drop_collection",
         description="Deletes an entire collection from a database. This action is irreversible.",
+        args_model=MongoDropCollectionArgs,
         handler=handler,
         parameters={
-            "type": "object",
-            "properties": {
-                "db_name": {"type": "string", "description": "The name of the database."},
-                "collection_name": {"type": "string", "description": "The name of the collection to drop."},
-            },
-            "required": ["db_name", "collection_name"],
+            "db_name": "the name of the database",
+            "collection_name": "the name of the collection to drop",
         },
     )
 
