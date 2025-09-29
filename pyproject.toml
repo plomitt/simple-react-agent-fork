@@ -1,9 +1,9 @@
 [project]
-name = "simple-or-agent"
+name = "struct_agent"
 version = "0.1.2"
-description = ""
+description = "A small, simple, and structured AI agent"
 authors = [
-    {name = "eugeny",email = "esshka@gmail.com"}
+    {name = "eugeny", email = "esshka@gmail.com"}
 ]
 readme = "README.md"
 requires-python = ">=3.12,<4"
@@ -20,9 +20,8 @@ dependencies = [
 ]
 
 [tool.poetry]
-packages = [{include = "src/simple_or_agent"}]
+packages = [{ include = "struct_agent", from = "src" }]
 package-mode = true
-
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
