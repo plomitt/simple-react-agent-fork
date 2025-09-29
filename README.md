@@ -1,177 +1,253 @@
-# Simple Agent
+# StructAgent
 
-A small, focused set of agents built on top of OpenRouter.  It includes a minimal client, a ReACT agent, and a planner+executor agent, with simple examples.
+A small, simple, and structured AI agent with reasoning capabilities and tool integration. Built with modern Python patterns and designed for extensibility.
 
-Key points
-- Minimal: small modules, simple defaults, under-300‑LOC guideline per file.
-- Reliable: automatic retries/backoff, robust response parsing, error surfacing.
-- Tools: ddgs web search and HTTP page fetch with basic HTML→text extraction.
-- ReACT: plan-then-act loop with tool calling, optional multi-round reasoning.
-- LLM-friendly: clear system prompts and tool schemas for better tool use.
+## Features
 
+- **Reasoning Agent**: Think-act-validate loop with structured reasoning steps
+- **Tool Integration**: Modular tool system with pluggable capabilities
+- **Multiple LLM Providers**: Support for OpenRouter, LM Studio, and other providers
+- **Mathematical Operations**: Symbolic math and expression evaluation
+- **Web Search**: SearXNG integration for meta-search capabilities
+- **Vector Indexing**: LEANN integration for semantic search and RAG
+- **Type Safety**: Full Pydantic validation and type hints
 
-Requirements
+## Quick Start
+
+### Prerequisites
+
 - Python 3.12+
 - Poetry (for dependency management)
-- OpenRouter API key in `OPENROUTER_API_KEY`
+- OpenRouter API key
 
+### Installation
 
-Quick start
-1) Install dependencies
-- `poetry install`
+1. **Clone and install dependencies**
+   ```bash
+   git clone https://github.com/esshka/simple-react-agent.git
+   cd simple_react_agent
+   poetry install
+   ```
 
-2) Configure API key
-- Copy `.env.example` to `.env` and set `OPENROUTER_API_KEY=...`
-- Optional: set a default model via `MODEL_ID` (defaults to `qwen/qwen3-next-80b-a3b-thinking`).
+2. **Configure environment**
+   ```bash
+   # Edit .env
+   cp .env.example .env
 
-3) Run the interactive chat loop
-- `poetry run python examples/chat_loop.py --show-reasoning`
-- Flags: `--model`, `--temperature`, `--with-calculator`, `--system`, `--once`, `--prompt`.
+   # And add your information
+   OPENROUTER_MODEL_ID=qwen/qwen3-next-80b-a3b-thinking
+   OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+   OPENROUTER_API_KEY="your-api-key"
 
-4) Run the ReAct chat (with optional web tools)
-- `poetry run python examples/react_chat.py`
-- One-shot: `poetry run python examples/react_chat.py --once --prompt "hello"`
-- Enable web tools: `poetry run python examples/react_chat.py --with-web --show-reasoning`
-- Flags: `--model`, `--temperature`, `--system`, `--reasoning-effort`, `--show-reasoning`, `--no-history`, `--once`, `--prompt`, `--verbose`,
-  and if `--with-web`: `--region`, `--time` (`d`,`w`,`m`,`y`), `--max-results`, `--fetch-chars`.
+   LMSTUDIO_MODEL_ID=qwen/qwen3-next-80b-a3b-thinking
+   LMSTUDIO_BASE_URL=http://123.123.1.123:1234/v1
+   LMSTUDIO_API_KEY="your-api-key"
 
-5) Run the deep research demo
-- `poetry run python examples/react_demo.py "what is BTC trend today?" --time d --max-results 8`
-- The agent uses ddgs search and fetches a few pages, synthesizing a short report with inline citations.
+   LEANN_CHAT_MODEL=qwen/qwen3-next-80b-a3b-thinking
+   SEARXNG_BASE_URL=http://localhost:8080
+   ```
 
+3. **Run the agent example**
+   ```bash
+   # Run as a module with PYTHONPATH
+   export PYTHONPATH=~/projects/simple_react_agent/src
+   poetry run python -m struct_agent.instructor_based.reasoning_agent
+   ```
 
-How it works
-- OpenRouter client (`src/simple_or_agent/openrouter_client.py`):
-  - Thin wrapper over `chat/completions` with retries (tenacity) and helpers:
-    - `complete_chat`, `extract_content`, `extract_reasoning`, `get_tool_calls`, `make_tool_result`.
-- ReAct agent (`src/simple_or_agent/react_agent.py`):
-  - Maintains messages, calls the model, executes declared tools, and loops until a final answer or limits.
-  - Supports tool-calls (function calling), optional parallel calls, and bounded tool iterations.
-- Tools in the demo (`examples/react_demo.py`):
-  - `web_search` via `ddgs` (DuckDuckGo). Returns title/url/snippet tuples.
- - `fetch_page` via `requests` + `beautifulsoup4`. Extracts readable text (caps length).
-  - SERP safety: search engine result pages (Google/Bing/DDG/Yahoo) are filtered or blocked from fetches.
-- Utility (`src/simple_or_agent/__init__.py`):
-  - `format_inline_citations(text)` adds simple `[n]` markers for bare URLs and appends a Sources section (used by the demo output).
- - NextAgent (`src/simple_or_agent/next_agent.py`):
-   - First creates a short plan.  Then executes via ReACT.  Useful for deeper tasks and research.
+## Module Overview
 
+### 1. Instructor Based (`src/struct_agent/instructor_based/`)
+- **ReasoningAgent**: Main agent implementation with think-act-validate loop
+- **Client Manager**: LLM client management and model resolution
+- **Prompt Manager**: System prompt templates and management
+- **Tool Manager**: Tool registration and execution framework
 
-Agent types
+### 2. Tools (`src/struct_agent/tools/`)
+- **Math Tools**: Arithmetic, symbolic math, equation solving
+- **SearXNG Tools**: Web search and meta-search capabilities
+- **LEANN Tools**: Vector indexing and semantic search
+- **Toolkits**: Pre-configured tool bundles
 
-- SimpleAgent: a single chat loop with optional function tools.  Keeps history if you want.
+## Basic Usage
 
-- ReActAgent: Thinker → Operator → Validator.  The model plans a single next action, you execute tools locally, and a small judge decides whether to finish.
+### Using the Reasoning Agent
 
-- NextAgent: Planner + ReACT.  It writes a short, focused plan with assumptions and risks.  Then it runs ReACT to solve the task.
-
-
-ReACT in this repo
-
-- Thought: the model explains the next step.  It is short and focused.
-
-- Action: either call a tool with JSON arguments, or finish with an answer.
-
-- Observation: the local tool runs.  The output is fed back into the loop.
-
-This repeats for a few steps.  A validator decides when to stop and produce the final answer.
-
-
-Programmatic use
 ```python
-from src.simple_or_agent.openrouter_client import OpenRouterClient
-from src.simple_or_agent.react_agent import ReActAgent, ToolSpec
+from struct_agent.instructor_based import ReasoningAgent
+from struct_agent.tools import MathsToolkit
 
-# Minimal client
-client = OpenRouterClient(app_name="simple-or-agent")
+# Initialize the agent
+agent = ReasoningAgent()
 
-# Agent
-agent = ReActAgent(client, keep_history=True, temperature=0.1, reasoning_effort="high")
+# Add tools from toolkits
+toolkits = [MathsToolkit()]
+for toolkit in toolkits:
+    for tool in toolkit:
+        agent.add_tool(tool)
 
-# Optional: add tools (see examples/react_demo.py for full versions)
-from ddgs import DDGS
+# Run the agent
+response = agent.run("What is the square root of 144?")
+print(f"Answer: {response.reasoning_steps[-1].result}")
+print(f"Reasoning steps: {len(response.reasoning_steps)}")
+```
 
-def web_search_handler(args):
-    query = args.get("query", "")
-    out = []
-    with DDGS() as ddg:
-        for r in ddg.text(query, region="us-en", max_results=5):
-            out.append({"title": r.get("title"), "url": r.get("href"), "snippet": r.get("body")})
-    return {"query": query, "results": out}
+## Configuration
 
-web_search = ToolSpec(
-    name="web_search",
-    description="Search the web via ddgs and return top results",
-    parameters={"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
-    handler=web_search_handler,
+### Environment Variables
+
+- `OPENROUTER_API_KEY`: Required for LLM access
+- `OPENROUTER_BASE_URL`: OpenRouter API base URL
+- `SEARXNG_BASE_URL`: SearXNG instance URL (default: http://localhost:8080)
+- `LEANN_CHAT_MODEL`: Model for LEANN chat functionality
+
+### Supported Models
+
+The agent supports various models through OpenRouter:
+- `qwen/qwen3-next-80b-a3b-thinking`
+- `anthropic/claude-3.5-sonnet`
+- `openai/gpt-4o`
+- And many more
+
+## Advanced Usage
+
+### Custom Tool Integration
+
+```python
+from struct_agent.instructor_based import ReasoningAgent, ToolSpec
+from pydantic import BaseModel, Field
+from typing import Dict, Any
+
+# Create structured arguments model
+class WeatherArgs(BaseModel):
+    location: str = Field(..., description="Location to get weather for")
+
+# Create handler function
+def weather_handler(args: Dict[str, Any]) -> Dict[str, Any]:
+    parsed_args = WeatherArgs(**args)
+    # Your weather API logic here
+    return {
+        "temperature": "25°C",
+        "condition": "sunny",
+        "location": parsed_args["location"]
+    }
+
+# Create tool specification
+weather_tool = ToolSpec(
+    name="get_weather",
+    description="Get current weather for a location",
+    args_model=WeatherArgs,
+    handler=weather_handler,
+    parameters={
+        "location": "The location to get weather for"
+    }
 )
 
-agent.add_tool(web_search)
+# Add to agent
+agent = ReasoningAgent()
+agent.add_tool(weather_tool)
 
-res = agent.ask("Find recent coverage of AI safety news")
-print(res.content)
+# Use the tool
+response = agent.run("What's the weather in New York?")
 ```
 
-NextAgent example
-```python
-from src.simple_or_agent.openrouter_client import OpenRouterClient
-from src/simple_or_agent.next_agent import NextAgent, ToolSpec
+### Running as Modules
 
-client = OpenRouterClient(app_name="next-agent")
-agent = NextAgent(client, model="qwen/qwen3-next-80b-a3b-thinking", reasoning_effort="high")
+```bash
+# With PYTHONPATH set
+export PYTHONPATH=~/projects/simple_react_agent/src
 
-# Optional: add tools (web_search, fetch_page). See examples/react_chat.py.
-
-plan_res = agent.plan("Research top 3 approaches to LLM agent reliability.")
-exec_res = agent.execute_with_plan("Research top 3 approaches to LLM agent reliability.", plan_res.content)
-print(exec_res.content)
+# Run individual module examples
+poetry run python -m struct_agent.instructor_based.reasoning_agent
+poetry run python -m struct_agent.tools.searxng_tools
 ```
 
+## Dependencies
 
-CLI references
-- Chat loop: `examples/chat_loop.py`
-  - Interactive, supports a lightweight calculator tool (`--with-calculator`).
-  - Optional response schema, system prompts, reasoning, and one-shot mode.
-- ReAct chat: `examples/react_chat.py`
-  - Interactive REAct agent; optionally exposes `web_search` + `fetch_page` via `--with-web`.
-  - Supports multi-round tool use, reasoning display, and history toggling.
-- Next demo: `examples/next_demo.py`
-  - Plan first, then execute via ReACT.  Good for deeper research tasks.
-- Research demo: `examples/react_demo.py`
-  - ddgs search + HTML fetch, SERP filtering, simple inline citations.
-  - Tunables: `--max-results`, `--time` (`d`, `w`, `m`, `y`), `--region`, `--fetch-chars`.
+### Core Dependencies
+- `pydantic>=2.7`: Data validation and serialization
+- `instructor>=1.3`: Structured outputs for LLM
+- `openai>=1.30`: OpenAI API client
+- `requests>=2.31`: HTTP requests
+- `tenacity>=8.2`: Retry mechanisms
+- `python-dotenv>=1.0`: Environment variable management
 
+### Tool Dependencies
+- `sympy`: Symbolic mathematics
+- `beautifulsoup4`: HTML parsing
+- `ddgs`: DuckDuckGo search
+- `leann>=0.3.4`: Vector indexing and search
+- `aiohttp`: Async HTTP client
 
-Configuration & env
-- `OPENROUTER_API_KEY`: required (can be set in `.env`).
-- `MODEL_ID`: default model identifier (overridden by `--model`).
-- Optional headers: `app_name`, `app_url` passed to `OpenRouterClient` for OpenRouter dashboard attribution.
+## Project Structure
 
+```
+src/struct_agent/
+├── __init__.py                 # Main package exports
+├── instructor_based/           # LLM client and agent logic
+│   ├── __init__.py
+│   ├── reasoning_agent.py      # Main ReasoningAgent class
+│   ├── client_manager.py       # LLM client management
+│   ├── prompt_manager.py       # System prompts
+│   └── tool_manager.py         # Tool registry and execution
+├── tools/                      # Modular tool system
+│   ├── __init__.py
+│   ├── maths_tools.py         # Mathematical operations
+│   ├── searxng_tools.py       # Web search
+│   ├── leann_tools.py         # Vector indexing
+│   └── toolkits.py            # Pre-configured tool bundles
+└── README.md                  # This file
+```
 
-Notes & limitations
-- ddgs may rate-limit or return sparse results for certain regions/time windows; the agent will attempt multiple queries but stays conservative.
-- `fetch_page` limits text length (default 5000 chars) and strips scripts/styles; some dynamic sites may yield little text.
-- SERP pages are intentionally not fetched to avoid noisy content; the model is nudged to select real articles.
-- This is not a browser/JS runtime; it’s an HTTP fetch + parse flow intended for concise research.
+## Development
 
-Recent improvements
-- Structured content handling: `extract_content` now tolerates list-based and nested content parts and the `parsed` field from providers.
-- Tool-call flow: the agent now preserves assistant tool-call messages in history, improving multi-round tool reliability.
+### Adding New Tools
 
+1. Create tool file in `src/struct_agent/tools/`
+2. Implement handler function and Pydantic models
+3. Add tool spec to module `__all__`
 
-Troubleshooting
-- `ddgs_import_failed: No module named 'ddgs'`
-  - Ensure dependencies are installed: `poetry update ddgs` or `poetry install`.
-  - Remove old package to avoid confusion: `poetry remove duckduckgo_search`.
-- OpenRouter errors (401/429/5xx)
-  - Verify `OPENROUTER_API_KEY`, wait and retry on 429/5xx, or lower request rate.
+### Code Style
 
+- Follow PEP 8
+- Use type hints consistently
+- Keep modules under 300 lines
+- Use Pydantic for all data validation
+- Include docstrings for all public methods
 
-Project layout
-- `src/simple_or_agent/openrouter_client.py` — OpenRouter wrapper + helpers
-- `src/simple_or_agent/react_agent.py` — ReAct loop and tool execution
-- `src/simple_or_agent/next_agent.py` — Planner + ReACT orchestration
-- `src/simple_or_agent/__init__.py` — small utilities (inline citations)
-- `examples/chat_loop.py` — interactive chat CLI
-- `examples/react_demo.py` — web research demo (ddgs + fetch)
- - `examples/next_demo.py` — demo for NextAgent (plan + ReACT)
+## Troubleshooting
+
+### Common Issues
+
+1. **ModuleNotFoundError**: Ensure PYTHONPATH includes the src directory
+   ```bash
+   export PYTHONPATH=~/projects/simple_react_agent/src
+   ```
+
+2. **Import Issues**: Use absolute imports for python -m compatibility
+   ```python
+   from struct_agent.instructor_based import ReasoningAgent  # Good
+   from .instructor_based import ReasoningAgent              # Bad for python -m
+   ```
+
+3. **Missing Dependencies**: Run poetry install to update
+   ```bash
+   poetry install
+   ```
+
+4. **Environment Variables**: Verify .env file exists and has required keys
+   ```bash
+   cp .env.example .env
+   # Edit .env with your API keys
+   ```
+
+## License
+
+This project is open source and available under the MIT License.
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests if applicable
+5. Submit a pull request
