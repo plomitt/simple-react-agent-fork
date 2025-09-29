@@ -1,6 +1,6 @@
 [project]
 name = "simple-or-agent"
-version = "0.1.0"
+version = "0.1.2"
 description = ""
 authors = [
     {name = "eugeny",email = "esshka@gmail.com"}
@@ -20,7 +20,8 @@ dependencies = [
 ]
 
 [tool.poetry]
-packages = [{include = "simple_or_agent", from = "src"}]
+packages = [{include = "src/simple_or_agent"}]
+package-mode = true
 
 
 [build-system]
