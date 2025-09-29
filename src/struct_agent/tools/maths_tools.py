@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 import operator as op
 import ast
 
-from simple_or_agent.instructor_based import ToolSpec
+from struct_agent.instructor_based import ToolSpec
 
 # --- BaseModel Classes for Mathematical Tools ---
 

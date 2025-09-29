@@ -7,7 +7,7 @@ import asyncio
 import json
 import os
 
-from simple_or_agent.instructor_based import ToolSpec
+from struct_agent.instructor_based import ToolSpec
 
 load_dotenv()
 

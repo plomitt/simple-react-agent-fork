@@ -7,9 +7,9 @@ from enum import Enum
 import json
 import sys
 
-from simple_or_agent.instructor_based.client_manager import build_client, resolve_model
-from simple_or_agent.instructor_based.prompt_manager import get_system_prompt
-from simple_or_agent.instructor_based.tool_manager import ToolRegistry, ToolSpec
+from struct_agent.instructor_based.client_manager import build_client, resolve_model
+from struct_agent.instructor_based.prompt_manager import get_system_prompt
+from struct_agent.instructor_based.tool_manager import ToolRegistry, ToolSpec
 
 if __package__ in {None, ""}:
     project_src = Path(__file__).resolve().parent.parent.parent
@@ -233,7 +233,7 @@ def run_reasoning_agent(
 __all__ = ["ReasoningAgent", "run_reasoning_agent"]
 
 if __name__ == "__main__":
-    from simple_or_agent.tools import MetaSearchToolkit, VectorIndexToolkit, MathsToolkit
+    from struct_agent.tools import MetaSearchToolkit, VectorIndexToolkit, MathsToolkit
     
     demo_agent = ReasoningAgent()
 
