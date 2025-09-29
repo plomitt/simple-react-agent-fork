@@ -1,13 +1,13 @@
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional, Dict, Any
+from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 import aiohttp
 import asyncio
 import json
 import os
-from pydantic import BaseModel, Field
 
-from simple_or_agent.instructor_based.tools import ToolSpec
+from simple_or_agent.instructor_based import ToolSpec
 
 load_dotenv()
 

@@ -1,11 +1,11 @@
 from leann import LeannBuilder, LeannSearcher, LeannChat
-from pathlib import Path
-from dotenv import load_dotenv
-from typing import Dict, Any, Optional, Type
-import os
 from pydantic import BaseModel, Field
+from dotenv import load_dotenv
+from typing import Dict, Any
+from pathlib import Path
+import os
 
-from simple_or_agent.instructor_based.tools import ToolSpec
+from simple_or_agent.instructor_based import ToolSpec
 
 load_dotenv()
 
@@ -20,7 +20,7 @@ INDEX_PATH = str(os.getenv("LEANN_INDEX_PATH", DEFAULT_INDEX_DIR) / "vector.lean
 # Ensure the index directory exists
 DEFAULT_INDEX_DIR.mkdir(parents=True, exist_ok=True)
 BACKEND_NAME = "hnsw"
-CHAT_MODEL = os.getenv("LEANN_CHAT_MODEL", "openai/gpt-oss-20b")
+CHAT_MODEL = os.getenv("LEANN_CHAT_MODEL")
 
 class AddTextArgs(BaseModel):
     """Inputs for the LEANN add text tool."""

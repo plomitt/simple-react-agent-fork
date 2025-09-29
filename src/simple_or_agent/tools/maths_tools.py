@@ -1,10 +1,10 @@
 from sympy import sympify, solve, simplify, diff, integrate, Matrix, expand, factor
 from typing import Dict, Any, Optional, List
+from pydantic import BaseModel, Field
 import operator as op
 import ast
-from pydantic import BaseModel, Field
 
-from simple_or_agent.instructor_based.tools import ToolSpec
+from simple_or_agent.instructor_based import ToolSpec
 
 # --- BaseModel Classes for Mathematical Tools ---
 

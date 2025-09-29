@@ -1,5 +1,5 @@
 # Python bytecode and cache
-__pycache__/
+**/__pycache__/
 *.py[cod]
 *$py.class
 
@@ -78,13 +78,13 @@ Thumbs.db
 .idea/
 .vscode/
 .history/
+.serena/
+.claude/
 
 # UV / pip wheel metadata (optional tooling)
 .uv/
 pip-wheel-metadata/
 AGENTS.md
-.serena/
-.claude/
 
 # LEANN
 **/leann_index/

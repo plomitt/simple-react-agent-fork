@@ -1,16 +1,8 @@
-# src/simple_or_agent/instructor_based/tools.py
-# Defines tool specifications and registry for Instructor-powered agents.
-# Exists to help agents declare and resolve tool calls consistently.
-# RELEVANT FILES: src/simple_or_agent/instructor_based/agent.py, src/simple_or_agent/instructor_based/prompt_manager.py, src/simple_or_agent/instructor_based/lmstudio_client.py
-
 from __future__ import annotations
-
-from types import MappingProxyType
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple, Type, Union
+from types import MappingProxyType
 from typing_extensions import List
-
 from pydantic import BaseModel
-
 
 class ToolSpec(BaseModel):
     """Describe a single tool the agent may call."""
@@ -31,7 +23,6 @@ class ToolSpec(BaseModel):
         if model is None:
             raise ValueError("ToolSpec requires response_model or args_model")
         return model
-
 
 class ToolRegistry:
     """Store tools and help the agent resolve tool calls."""
@@ -77,9 +68,7 @@ class ToolRegistry:
                 return name, spec
         raise ValueError("Received tool payload that matches no registered tool")
 
-
 __all__ = ["ToolRegistry", "ToolSpec"]
-
 
 if __name__ == "__main__":
     tools = ToolRegistry()
