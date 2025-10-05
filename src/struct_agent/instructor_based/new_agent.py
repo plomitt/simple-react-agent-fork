@@ -63,9 +63,11 @@ def run_react_loop(query: str, client: instructor.Client, config: dict = {}) -> 
             "You are an agent that uses a Thought → Action → Observation loop.\n"
             f"Available tools: {tool_names()}.\n"
             "Current step: Thought/FinalAnswer.\n"
-            "Call FinalAnswerTool to answer the user.\n\n"
+            "Review the history above to see what information you have already gathered from previous observations.\n"
+            "If you have sufficient information from previous observations to answer the user's question completely, call FinalAnswerTool immediately to provide the final answer.\n"
+            "If you still need more information, use ThinkResponse to explain what additional information you need to gather.\n"
         )
-        
+
         return get_messages(system_prompt)
     
     def get_action_messages():
@@ -73,6 +75,7 @@ def run_react_loop(query: str, client: instructor.Client, config: dict = {}) -> 
             "You are an agent that uses a Thought → Action → Observation loop.\n"
             f"Available tools: {tool_names()}.\n"
             "Current step: Action.\n"
+            "Based on the latest thought, call the appropriate tool to answer the user's question.\n"
         )
 
         return get_messages(system_prompt)

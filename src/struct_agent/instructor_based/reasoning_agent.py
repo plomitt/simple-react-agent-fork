@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from enum import Enum
 import json
 
-from struct_agent.instructor_based.client_manager import build_client, resolve_model
+from struct_agent.instructor_based.client_manager import build_client
 from struct_agent.instructor_based.prompt_manager import get_system_prompt
 from struct_agent.instructor_based.tool_manager import ToolRegistry, ToolSpec
 
