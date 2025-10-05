@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from typing import Callable, Dict, List, Tuple, Type, Union
+from typing import List, Type, Union
 
 import instructor
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from struct_agent.instructor_based.client_manager import build_client
 from struct_agent.instructor_based.tool_manager import ToolSpec
+from struct_agent.instructor_based.utils import merge_configs
 from struct_agent.tools.searxng_tools import make_searxng_search_tool
 from pprint import pprint
 
 load_dotenv()
-
 
 class FinalAnswerTool(BaseModel):
     """Deliver the final answer when reasoning is complete."""
@@ -24,8 +24,17 @@ class ThinkResponse(BaseModel):
     
     thought: str
 
-def run_react_loop(query: str, client: instructor.Client, config: dict = {'max_steps': 10, 'tools': []}) -> str:
+def run_react_loop(query: str, client: instructor.Client, config: dict = {}) -> str:
     """Run the ReAct loop until the agent returns a final answer."""
+
+    # Configure
+    default_config = {
+        'max_steps': 10,
+        'tools': [make_searxng_search_tool()]
+    }
+
+    config = merge_configs(config, default_config)
+
     tools: List[ToolSpec] = config['tools']
 
     def response_union() -> Type[BaseModel]:
@@ -44,10 +53,7 @@ def run_react_loop(query: str, client: instructor.Client, config: dict = {'max_s
     
     def get_messages(system_prompt):
         return [
-            {
-                "role": "system",
-                "content": system_prompt,
-            },
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"User query: {query}"},
             {"role": "system", "content": f"History:\n{'\n'.join(history)}"},
         ]
@@ -71,13 +77,15 @@ def run_react_loop(query: str, client: instructor.Client, config: dict = {'max_s
 
         return get_messages(system_prompt)
     
+    # Run loop
     history: List[str] = []
 
     for step_num in range(config['max_steps']):
         print(f"\n=== STEP {step_num + 1} ===")
+
         # Think
+        print("Thinking...")
         messages = get_thought_messages()
-        print("Making thinking API call...")
         thought = client.chat.completions.create(
             messages=messages,
             response_model=Union[ThinkResponse, FinalAnswerTool],
@@ -90,15 +98,16 @@ def run_react_loop(query: str, client: instructor.Client, config: dict = {'max_s
         history.append(f"Thought: {thought_content}")
 
         # Act
+        print("Acting...")
         messages = get_action_messages()
         act_model = response_union()
-        print("Making action API call...")
         action = client.chat.completions.create(
             messages=messages,
             response_model=act_model,
         )
 
         # Observe
+        print("Observing...")
         tool = resolve_tool(action)
         payload = action.model_dump()
 
@@ -120,12 +129,8 @@ def run_react_loop(query: str, client: instructor.Client, config: dict = {'max_s
         print(action_content)
 
         print("Observation:", "="*50)
-        print(observation_content)
+        print(str(observation_content)[:100])
         #---
-
-        # print(f"History: {history}")
-        # print("Histoty:", "="*50)
-        # pprint(history)
 
     return f"Max steps ({config['max_steps']}) reached before final answer."
 
@@ -134,7 +139,5 @@ if __name__ == "__main__":
     query = "What is the weather in the capital of France, and what is that city known for?"
 
     client = build_client(use_lmstudio=True)
-    searxng_tool = make_searxng_search_tool()
-    config = {'max_steps': 10, 'tools': [searxng_tool]}
-    answer = run_react_loop(query, client, config)
-    print("Final Answer:", answer)
+    answer = run_react_loop(query, client)
+    print("\nFinal Answer:", answer)

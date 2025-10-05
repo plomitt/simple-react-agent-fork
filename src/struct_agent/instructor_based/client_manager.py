@@ -1,31 +1,48 @@
 from instructor import Mode
-from typing import Optional
+from typing import Optional, Dict, Any
 from openai import OpenAI
 import instructor
 import os
 
-def resolve_model(use_lmstudio: bool = False):
+from struct_agent.instructor_based.utils import merge_configs
+
+def get_openrouter_default_config() -> Dict[str, Any]:
+    """Get default configuration for OpenRouter client."""
+    return {
+        "base_url": os.getenv("OPENROUTER_BASE_URL"),
+        "api_key": os.getenv("OPENROUTER_API_KEY"),
+        "model": os.getenv("OPENROUTER_MODEL_ID"),
+        "mode": Mode.TOOLS,
+    }
+
+def get_lmstudio_default_config() -> Dict[str, Any]:
+    """Get default configuration for LMStudio client."""
+    return {
+        "base_url": os.getenv("LMSTUDIO_BASE_URL"),
+        "api_key": os.getenv("LMSTUDIO_API_KEY", '123'),
+        "model": os.getenv("LMSTUDIO_MODEL_ID"),
+        "mode": Mode.JSON_SCHEMA,
+    }
+
+def build_openrouter_client(config: Optional[Dict[str, Any]] = {}):
+    """Build OpenRouter client with configuration."""
+    default_config = get_openrouter_default_config()
+    final_config = merge_configs(config, default_config)
+    
+    provider = f'openrouter/{final_config["model"]}'
+    return instructor.from_provider(provider, api_key=final_config["api_key"], mode=final_config["mode"], base_url=final_config["base_url"])
+
+def build_lmstudio_client(config: Optional[Dict[str, Any]] = {}):
+    """Build LMStudio client with configuration."""
+    default_config = get_lmstudio_default_config()
+    final_config = merge_configs(config, default_config)
+
+    openai_client = OpenAI(api_key=final_config["api_key"], base_url=final_config["base_url"])
+    return instructor.from_openai(openai_client, mode=final_config["mode"], model=final_config["model"])
+
+def build_client(use_lmstudio: Optional[bool] = False, config: Optional[Dict[str, Any]] = {}):
     if use_lmstudio:
-        return os.getenv("LMSTUDIO_MODEL_ID")
-    return os.getenv("OPENROUTER_MODEL_ID")
+        return build_lmstudio_client(config)
+    return build_openrouter_client(config)
 
-def build_or_client(model: Optional[str] = None, api_key: Optional[str] = None, base_url: Optional[str] = None):
-    resolved_base_url = base_url or os.getenv("OPENROUTER_BASE_URL")
-    resolved_api_key = api_key or os.getenv("OPENROUTER_API_KEY")
-    resolved_model = model or resolve_model()
-    provider = f'openrouter/{resolved_model}'
-    return instructor.from_provider(provider, api_key=resolved_api_key, mode=Mode.TOOLS, base_url=resolved_base_url)
-
-def build_lm_client(model: Optional[str] = None, api_key: Optional[str] = None, base_url: Optional[str] = None):
-    resolved_base_url = base_url or os.getenv("LMSTUDIO_BASE_URL")
-    resolved_api_key = api_key or os.getenv("LMSTUDIO_API_KEY", '123')
-    resolved_model = model or resolve_model(use_lmstudio=True)
-    openai_client = OpenAI(api_key=resolved_api_key, base_url=resolved_base_url)
-    return instructor.from_openai(openai_client, mode=Mode.JSON_SCHEMA, model=resolved_model)
-
-def build_client(model: Optional[str] = None, api_key: Optional[str] = None, base_url: Optional[str] = None, use_lmstudio: bool = False):
-    if use_lmstudio:
-        return build_lm_client(model, api_key, base_url)
-    return build_or_client(model, api_key, base_url)
-
-__all__ = ["resolve_model", "build_or_client", "build_lm_client", "build_client"]
+__all__ = ["build_openrouter_client", "build_lmstudio_client", "build_client"]
