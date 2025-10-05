@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from struct_agent.instructor_based.client_manager import build_client
+from struct_agent.instructor_based.prompt_manager import get_system_prompt
 from struct_agent.instructor_based.tool_manager import ToolSpec
 from struct_agent.instructor_based.utils import merge_configs
 from struct_agent.tools.searxng_tools import make_searxng_search_tool
@@ -45,6 +46,9 @@ def run_react_loop(query: str, client: instructor.Client, config: dict = {}) -> 
     def tool_names() -> List[str]:
         return [tool.name for tool in tools]
     
+    def tool_names_and_descriptions() -> List[str]:
+        return [f"  - {tool.name}: {tool.description}\n" for tool in tools]
+    
     def resolve_tool(payload: ToolSpec) -> ToolSpec:
         for tool in tools:
             if isinstance(payload, tool.model_class()):
@@ -58,15 +62,13 @@ def run_react_loop(query: str, client: instructor.Client, config: dict = {}) -> 
             {"role": "system", "content": f"History:\n{'\n'.join(history)}"},
         ]
     
-    def get_thought_messages():
-        system_prompt = (
-            "You are an agent that uses a Thought → Action → Observation loop.\n"
-            f"Available tools: {tool_names()}.\n"
-            "Current step: Thought/FinalAnswer.\n"
-            "Review the history above to see what information you have already gathered from previous observations.\n"
-            "If you have sufficient information from previous observations to answer the user's question completely, call FinalAnswerTool immediately to provide the final answer.\n"
-            "If you still need more information, use ThinkResponse to explain what additional information you need to gather.\n"
-        )
+    def get_thought_messages(history):
+        tool_catalog = "".join(tool_names_and_descriptions())
+        history_catalog = '\n'.join(history)
+        system_prompt = get_system_prompt(1, 10, tool_catalog, history_catalog)
+
+        # print("System prompt:", "="*50)
+        # print(system_prompt[-50:])
 
         return get_messages(system_prompt)
     
@@ -88,13 +90,15 @@ def run_react_loop(query: str, client: instructor.Client, config: dict = {}) -> 
 
         # Think
         print("Thinking...")
-        messages = get_thought_messages()
+        messages = get_thought_messages(history)
         thought = client.chat.completions.create(
             messages=messages,
             response_model=Union[ThinkResponse, FinalAnswerTool],
         )
 
         if isinstance(thought, FinalAnswerTool):
+            # print("History:", "="*50)
+            # pprint(history)
             return thought.answer
 
         thought_content = thought.thought
@@ -134,6 +138,9 @@ def run_react_loop(query: str, client: instructor.Client, config: dict = {}) -> 
         print("Observation:", "="*50)
         print(str(observation_content)[:100])
         #---
+    
+    # print("History:", "="*50)
+    # pprint(history)
 
     return f"Max steps ({config['max_steps']}) reached before final answer."
 
