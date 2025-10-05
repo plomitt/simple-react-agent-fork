@@ -16,15 +16,16 @@ def build_or_client(model: Optional[str] = None, api_key: Optional[str] = None, 
     provider = f'openrouter/{resolved_model}'
     return instructor.from_provider(provider, api_key=resolved_api_key, mode=Mode.TOOLS, base_url=resolved_base_url)
 
-def build_lm_client(api_key: Optional[str] = None, base_url: Optional[str] = None):
+def build_lm_client(model: Optional[str] = None, api_key: Optional[str] = None, base_url: Optional[str] = None):
     resolved_base_url = base_url or os.getenv("LMSTUDIO_BASE_URL")
     resolved_api_key = api_key or os.getenv("LMSTUDIO_API_KEY", '123')
+    resolved_model = model or resolve_model(use_lmstudio=True)
     openai_client = OpenAI(api_key=resolved_api_key, base_url=resolved_base_url)
-    return instructor.from_openai(openai_client, mode=Mode.JSON)
+    return instructor.from_openai(openai_client, mode=Mode.JSON_SCHEMA, model=resolved_model)
 
 def build_client(model: Optional[str] = None, api_key: Optional[str] = None, base_url: Optional[str] = None, use_lmstudio: bool = False):
     if use_lmstudio:
-        return build_lm_client(api_key, base_url)
+        return build_lm_client(model, api_key, base_url)
     return build_or_client(model, api_key, base_url)
 
 __all__ = ["resolve_model", "build_or_client", "build_lm_client", "build_client"]
