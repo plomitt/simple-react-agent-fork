@@ -5,7 +5,9 @@ from typing import List, Optional
 import instructor
 from instructor import Mode
 from pydantic import BaseModel, Field
+from dotenv import load_dotenv
 
+load_dotenv()
 
 class NextAction(str, Enum):
     CONTINUE = "continue"
@@ -18,19 +20,11 @@ api_key = os.getenv("OPENROUTER_API_KEY")
 
 class ReasoningStep(BaseModel):
     title: Optional[str] = Field(None, description="A concise title summarizing the step's purpose")
-    action: Optional[str] = Field(
-        None, description="The action derived from this step. Talk in first person like I will ..."
-    )
-    result: Optional[str] = Field(
-        None, description="The result of executing the action. Talk in first person like I did this and got ... "
-    )
+    action: Optional[str] = Field(None, description="The action derived from this step. Talk in first person like I will ...")
+    result: Optional[str] = Field(None, description="The result of executing the action. Talk in first person like I did this and got ... ")
     reasoning: Optional[str] = Field(None, description="The thought process and considerations behind this step")
-    next_action: Optional[NextAction] = Field(
-        None,
-        description="Indicates whether to continue reasoning, validate the provided result, or confirm that the result is the final answer",
-    )
+    next_action: Optional[NextAction] = Field(None, description="Indicates whether to continue reasoning, validate the provided result, or confirm that the result is the final answer")
     confidence: Optional[float] = Field(None, description="Confidence score for this step (0.0 to 1.0)")
-
 
 class ReasoningSteps(BaseModel):
     reasoning_steps: List[ReasoningStep] = Field(..., description="A list of reasoning steps")
@@ -94,7 +88,7 @@ def get_system_prompt(min_steps: int = 1, max_steps: int = 10):
     """
 
 def run_reasoning_agent(prompt: str):
-    client = instructor.from_provider("openrouter/openai/gpt-oss-20b", api_key=api_key, mode=Mode.TOOLS)
+    client = instructor.from_provider("openrouter/qwen/qwen3-30b-a3b", api_key=api_key, mode=Mode.TOOLS)
 
     messages = [
         {"role": "system", "content": get_system_prompt()},
@@ -102,17 +96,20 @@ def run_reasoning_agent(prompt: str):
     ]
 
     response = client.chat.completions.create(
-            model="qwen/qwen3-next-80b-a3b-thinking",
-            messages=messages,
-            response_model=ReasoningSteps,
-            extra_body={"provider": {"require_parameters": True}}
-        )
+        model="qwen/qwen3-30b-a3b",
+        messages=messages,
+        response_model=ReasoningSteps,
+        extra_body={"provider": {"require_parameters": True}}
+    )
 
     return response
 
 
 if __name__ == "__main__":
-    response = run_reasoning_agent("Given this table defining * on the set S = {a, b, c, d, e}\n\n|*|a|b|c|d|e|\n|---|---|---|---|---|---|\n|a|a|b|c|b|d|\n|b|b|c|a|e|c|\n|c|c|a|b|b|a|\n|d|b|e|b|e|d|\n|e|d|b|a|d|c|\n\nprovide the subset of S involved in any possible counter-examples that prove * is not commutative. Provide your answer as a comma separated list of the elements in the set in alphabetical order.")
+    response = run_reasoning_agent("What is 2 + 22?")
+    # response = run_reasoning_agent("Given this table defining * on the set S = {a, b, c, d, e}\n\n|*|a|b|c|d|e|\n|---|---|---|---|---|---|\n|a|a|b|c|b|d|\n|b|b|c|a|e|c|\n|c|c|a|b|b|a|\n|d|b|e|b|e|d|\n|e|d|b|a|d|c|\n\nprovide the subset of S involved in any possible counter-examples that prove * is not commutative. Provide your answer as a comma separated list of the elements in the set in alphabetical order.")
+    print(type(response.reasoning_steps[0]))
+    print(str(response.reasoning_steps[0]))
     print("Reasoning Steps: ", response.reasoning_steps)
     print("\n")
     print("Final Answer: ", response.reasoning_steps[-1].result)

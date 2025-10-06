@@ -40,8 +40,9 @@ def build_lmstudio_client(config: Optional[Dict[str, Any]] = {}):
     openai_client = OpenAI(api_key=final_config["api_key"], base_url=final_config["base_url"])
     return instructor.from_openai(openai_client, mode=final_config["mode"], model=final_config["model"])
 
-def build_client(use_lmstudio: Optional[bool] = False, config: Optional[Dict[str, Any]] = {}):
-    if use_lmstudio:
+def build_client(use_lmstudio: Optional[bool] = None, config: Optional[Dict[str, Any]] = {}):
+    use_lmstudio_final = use_lmstudio or os.getenv("USE_LMSTUDIO", "false").lower() == "true"
+    if use_lmstudio_final:
         return build_lmstudio_client(config)
     return build_openrouter_client(config)
 
