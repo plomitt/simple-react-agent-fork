@@ -1,4 +1,4 @@
-from instructor import Mode
+from instructor import Instructor, Mode
 from typing import Optional, Dict, Any
 from openai import OpenAI
 import instructor
@@ -24,7 +24,7 @@ def get_lmstudio_default_config() -> Dict[str, Any]:
         "mode": Mode.JSON_SCHEMA,
     }
 
-def build_openrouter_client(config: Optional[Dict[str, Any]] = {}):
+def build_openrouter_client(config: Optional[Dict[str, Any]] = {}) -> Instructor:
     """Build OpenRouter client with configuration."""
     default_config = get_openrouter_default_config()
     final_config = merge_configs(config, default_config)
@@ -32,7 +32,7 @@ def build_openrouter_client(config: Optional[Dict[str, Any]] = {}):
     provider = f'openrouter/{final_config["model"]}'
     return instructor.from_provider(provider, api_key=final_config["api_key"], mode=final_config["mode"], base_url=final_config["base_url"])
 
-def build_lmstudio_client(config: Optional[Dict[str, Any]] = {}):
+def build_lmstudio_client(config: Optional[Dict[str, Any]] = {}) -> Instructor:
     """Build LMStudio client with configuration."""
     default_config = get_lmstudio_default_config()
     final_config = merge_configs(config, default_config)
@@ -40,7 +40,7 @@ def build_lmstudio_client(config: Optional[Dict[str, Any]] = {}):
     openai_client = OpenAI(api_key=final_config["api_key"], base_url=final_config["base_url"])
     return instructor.from_openai(openai_client, mode=final_config["mode"], model=final_config["model"])
 
-def build_client(use_lmstudio: Optional[bool] = None, config: Optional[Dict[str, Any]] = {}):
+def build_client(use_lmstudio: Optional[bool] = None, config: Optional[Dict[str, Any]] = {}) -> Instructor:
     use_lmstudio_final = use_lmstudio or os.getenv("USE_LMSTUDIO", "false").lower() == "true"
     if use_lmstudio_final:
         return build_lmstudio_client(config)

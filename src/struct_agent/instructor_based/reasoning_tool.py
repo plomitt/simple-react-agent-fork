@@ -2,7 +2,7 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from enum import Enum
 
-from struct_agent.instructor_based.prompt_manager import get_reasoning_prompt
+from struct_agent.instructor_based.reasoning_prompt import get_reasoning_prompt
 from struct_agent.instructor_based.client_manager import build_client
 from struct_agent.instructor_based.tool_manager import ToolSpec
 

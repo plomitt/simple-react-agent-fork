@@ -9,7 +9,7 @@ from pathlib import Path
 import sys
 
 from struct_agent.instructor_based import simple_client
-from struct_agent.instructor_based.prompt_manager import get_system_prompt
+from struct_agent.instructor_based.reasoning_prompt import get_system_prompt
 from struct_agent.instructor_based import openrouter_client
 from struct_agent.instructor_based.tool_manager import ToolRegistry, ToolSpec
 from struct_agent.tools.searxng_tools import make_searxng_search_tool
