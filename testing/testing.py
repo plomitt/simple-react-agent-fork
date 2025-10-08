@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from struct_agent.instructor_based.new_agent import run_react_loop
 from struct_agent.instructor_based.client_manager import build_client
+from config_manager import AgentConfigManager
 
 
 class ConsoleCapture:
@@ -107,14 +108,18 @@ class RunManager:
 
                 runs.append(run_info)
 
-        # Sort by start time (newest first)
-        runs.sort(key=lambda x: x.get("start_time", ""), reverse=True)
+        # Sort by start time (newest first), None values last
+        runs.sort(key=lambda x: (x.get("start_time") is None, x.get("start_time", "")), reverse=True)
         return runs
 
-    def save_checkpoint(self, run_id: str, checkpoint_data: Dict[str, Any]) -> None:
+    def save_checkpoint(self, run_id: str, checkpoint_data: Dict[str, Any], agent_config_id: Optional[str] = None) -> None:
         """Save checkpoint data atomically."""
         run_dir = os.path.join(self.base_output_dir, run_id)
         os.makedirs(run_dir, exist_ok=True)
+
+        # Include agent config ID in checkpoint data
+        if agent_config_id:
+            checkpoint_data["agent_config_id"] = agent_config_id
 
         checkpoint_file = os.path.join(run_dir, "checkpoint.json")
         temp_file = checkpoint_file + ".tmp"
@@ -145,7 +150,7 @@ class RunManager:
         except (json.JSONDecodeError, FileNotFoundError):
             return None
 
-    def save_checkpoint_results(self, run_id: str, results: List[Dict[str, Any]], summary: Dict[str, Any], console_output: str = "") -> None:
+    def save_checkpoint_results(self, run_id: str, results: List[Dict[str, Any]], summary: Dict[str, Any], console_output: str = "", agent_config_id: Optional[str] = None) -> None:
         """Save intermediate results atomically to checkpoints folder."""
         run_dir = os.path.join(self.base_output_dir, run_id)
         checkpoints_dir = os.path.join(run_dir, "checkpoints")
@@ -194,6 +199,8 @@ class RunManager:
                 f.write("=" * 80 + "\n")
                 f.write(f"Current question: {summary.get('current_question', 0)}/{summary.get('total_questions', 0)}\n")
                 f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                if agent_config_id:
+                    f.write(f"Agent Config ID: {agent_config_id}\n")
                 f.write("")
                 
                 # Add comprehensive summary content
@@ -282,6 +289,8 @@ class RunManager:
                 f.write(f"CONSOLE LOG - Run {run_id} - Question {summary.get('current_question', 0)}/{summary.get('total_questions', 0)}\n")
                 f.write("=" * 80 + "\n")
                 f.write(f"Timestamp: {datetime.now().isoformat()}\n")
+                if agent_config_id:
+                    f.write(f"Agent Config ID: {agent_config_id}\n")
                 f.write("=" * 80 + "\n\n")
                 f.write(console_output)
 
@@ -318,17 +327,21 @@ class RunManager:
             except Exception as e:
                 print(f"⚠ Warning: Failed to clean up checkpoint files: {e}")
 
-    def save_final_results(self, run_id: str, summary: Dict[str, Any], results: List[Dict[str, Any]], console_output: str = "") -> None:
+    def save_final_results(self, run_id: str, summary: Dict[str, Any], results: List[Dict[str, Any]], console_output: str = "", agent_config_id: Optional[str] = None) -> None:
         """Save final results with clear, standardized names."""
         run_dir = os.path.join(self.base_output_dir, run_id)
         temp_dir = os.path.join(run_dir, "temp")
+
+        # Include agent config info in summary
+        if agent_config_id:
+            summary["agent_config_id"] = agent_config_id
 
         # Final files with clear names
         final_csv_file = os.path.join(run_dir, "FINAL_RESULTS.csv")
         final_summary_file = os.path.join(run_dir, "FINAL_SUMMARY.txt")
         final_output_file = os.path.join(run_dir, "FULL_OUTPUT.txt")
 
-        # Save final CSV with enhanced columns
+        # Save final CSV with enhanced columns (including agent config)
         temp_csv = os.path.join(temp_dir, "final_results.tmp")
         try:
             with open(temp_csv, 'w', newline='', encoding='utf-8') as f:
@@ -383,6 +396,8 @@ class RunManager:
         print(f"  CSV Data: {final_csv_file}")
         print(f"  Summary: {final_summary_file}")
         print(f"  Full Output: {final_output_file}")
+        if agent_config_id:
+            print(f"  Agent Config: {agent_config_id}")
 
 
 class AnswerValidation(BaseModel):
@@ -548,230 +563,6 @@ def run_single_test(
     return result
 
 
-def run_test_suite(
-    questions_file: str,
-    use_lmstudio: bool = True,
-    max_steps: int = 10,
-    limit: Optional[int] = None,
-    run_manager: Optional[RunManager] = None,
-    run_id: Optional[str] = None,
-    resume_mode: bool = False
-) -> Tuple[Dict[str, Any], List[Dict[str, Any]], str]:
-    """
-    Run the complete test suite with checkpoint and resume functionality.
-
-    Args:
-        questions_file: Path to the JSONL questions file
-        use_lmstudio: Whether to use LM Studio or OpenRouter
-        max_steps: Maximum steps per question
-        limit: Optional limit on number of questions to test
-        run_manager: RunManager instance for checkpointing
-        run_id: Specific run ID to use or resume
-        resume_mode: Whether to resume from checkpoint
-
-    Returns:
-        Tuple of (summary_stats, detailed_results, run_id)
-    """
-    if run_manager is None:
-        run_manager = RunManager()
-
-    # Initialize console capture
-    console_capture = ConsoleCapture()
-    console_capture.start_capture()
-
-    print("Starting comprehensive agent test suite...")
-
-    # Load questions
-    try:
-        questions = load_questions_from_jsonl(questions_file)
-        if limit:
-            questions = questions[:limit]
-        print(f"✓ Loaded {len(questions)} questions from {questions_file}")
-    except Exception as e:
-        print(f"✗ Failed to load questions: {e}")
-        return {"error": "Failed to load questions"}, [], ""
-
-    # Initialize clients
-    try:
-        agent_client = build_client(use_lmstudio=use_lmstudio)
-        validation_client = build_client(use_lmstudio=use_lmstudio)
-        print("✓ Clients initialized successfully")
-    except Exception as e:
-        print(f"✗ Failed to initialize clients: {e}")
-        return {"error": "Client initialization failed"}, [], ""
-
-    # Handle run ID and resume logic
-    start_question = 0
-    results = []
-
-    if resume_mode and run_id:
-        # Resume existing run
-        checkpoint = run_manager.load_checkpoint(run_id)
-        if checkpoint:
-            start_question = checkpoint.get("current_question", 0)
-            results = checkpoint.get("results", [])
-            print(f"✓ Resuming run {run_id} from question {start_question + 1}/{len(questions)}")
-        else:
-            print(f"✗ No checkpoint found for run {run_id}, starting fresh")
-            resume_mode = False
-    elif not run_id:
-        # Create new run
-        run_id = run_manager.generate_run_id()
-        print(f"✓ Starting new run: {run_id}")
-
-    # Create run directory
-    run_dir = run_manager.create_run_directory(run_id)
-
-    # Initialize checkpoint data
-    start_time = datetime.now().isoformat()
-    checkpoint_data = {
-        "run_id": run_id,
-        "questions_file": questions_file,
-        "use_lmstudio": use_lmstudio,
-        "max_steps": max_steps,
-        "limit": limit,
-        "start_time": start_time,
-        "total_questions": len(questions),
-        "current_question": start_question,
-        "results": results,
-        "is_complete": False
-    }
-
-    # Save initial checkpoint
-    run_manager.save_checkpoint(run_id, checkpoint_data)
-
-    def calculate_enhanced_summary(results: List[Dict[str, Any]], total_questions: int, current_question: int) -> Dict[str, Any]:
-        """Calculate summary with level-specific stats and failure breakdown."""
-        # Basic stats
-        successful_runs = sum(1 for r in results if r["success"])
-        failed_runs = sum(1 for r in results if not r["success"])
-        correct_answers = sum(1 for r in results if r["success"] and r["is_correct"])
-        incorrect_answers = sum(1 for r in results if r["success"] and not r["is_correct"])
-        total_time = sum(r["execution_time"] or 0 for r in results)
-        total_steps = sum(r["steps_taken"] or 0 for r in results if r["success"])
-
-        # Failure breakdown
-        failure_breakdown = {}
-        for result in results:
-            if not result["success"]:
-                failure_type = result.get("failure_type", "unknown")
-                failure_breakdown[failure_type] = failure_breakdown.get(failure_type, 0) + 1
-
-        # Level-specific statistics
-        level_stats = {}
-        for result in results:
-            level = str(result.get("question_level", "unknown"))
-            if level not in level_stats:
-                level_stats[level] = {
-                    "total": 0,
-                    "successful_runs": 0,
-                    "correct_answers": 0,
-                    "failed_runs": 0,
-                    "failure_breakdown": {}
-                }
-            
-            level_stats[level]["total"] += 1
-            
-            if result["success"]:
-                level_stats[level]["successful_runs"] += 1
-                if result["is_correct"]:
-                    level_stats[level]["correct_answers"] += 1
-            else:
-                level_stats[level]["failed_runs"] += 1
-                failure_type = result.get("failure_type", "unknown")
-                level_stats[level]["failure_breakdown"][failure_type] = level_stats[level]["failure_breakdown"].get(failure_type, 0) + 1
-
-        return {
-            "total_questions": total_questions,
-            "successful_runs": successful_runs,
-            "failed_runs": failed_runs,
-            "success_rate": (successful_runs / current_question) * 100 if current_question > 0 else 0,
-            "correct_answers": correct_answers,
-            "incorrect_answers": incorrect_answers,
-            "accuracy_rate": (correct_answers / successful_runs) * 100 if successful_runs > 0 else 0,
-            "total_execution_time": total_time,
-            "average_execution_time": total_time / current_question if current_question > 0 else 0,
-            "total_steps": total_steps,
-            "average_steps": total_steps / successful_runs if successful_runs > 0 else 0,
-            "questions_answered": successful_runs,
-            "questions_not_answered": failed_runs,
-            "current_question": current_question,
-            "failure_breakdown": failure_breakdown,
-            "level_stats": level_stats
-        }
-
-    # Track results
-    current_summary = calculate_enhanced_summary(results, len(questions), start_question)
-
-    # Run questions (starting from resume point if applicable)
-    for i in range(start_question, len(questions)):
-        question_data = questions[i]
-        question_num = i + 1
-
-        print(f"\n--- Test {question_num}/{len(questions)} ---")
-        print(f"Task ID: {question_data.get('task_id', 'unknown')}")
-        print(f"Question: {question_data['Question'][:100]}{'...' if len(question_data['Question']) > 100 else ''}")
-        print(f"Expected: {question_data['Final answer']}")
-
-        result = run_single_test(
-            question_data,
-            agent_client,
-            validation_client,
-            max_steps
-        )
-
-        # Update counters
-        if result["success"]:
-            if result["is_correct"]:
-                print(f"✓ Correct ({result['execution_time']:.2f}s, {result['steps_taken']} steps)")
-            else:
-                print(f"✗ Incorrect ({result['execution_time']:.2f}s, {result['steps_taken']} steps)")
-                print(f"  Agent answered: {result['agent_answer'][:100]}{'...' if len(result['agent_answer']) > 100 else ''}")
-        else:
-            print(f"✗ Failed ({result['execution_time']:.2f}s): {result['error']}")
-
-        results.append(result)
-
-        # Calculate current summary
-        current_summary = calculate_enhanced_summary(results, len(questions), question_num)
-
-        # Update and save checkpoint
-        checkpoint_data.update({
-            "current_question": question_num,
-            "results": results
-        })
-        run_manager.save_checkpoint(run_id, checkpoint_data)
-
-        # Save intermediate results
-        console_output = console_capture.get_output()
-        run_manager.save_checkpoint_results(run_id, results, current_summary, console_output)
-
-        print(f"✓ Checkpoint saved after question {question_num}/{len(questions)}")
-
-    # Mark run as complete
-    checkpoint_data["is_complete"] = True
-    checkpoint_data["end_time"] = datetime.now().isoformat()
-    run_manager.save_checkpoint(run_id, checkpoint_data)
-
-    # Calculate final summary statistics
-    final_summary = calculate_enhanced_summary(results, len(questions), len(questions))
-    final_summary.update({
-        "run_id": run_id,
-        "run_dir": run_dir
-    })
-
-    # Save final results with clear file names
-    console_output = console_capture.get_output()
-    run_manager.save_final_results(run_id, final_summary, results, console_output)
-
-    # Stop console capture
-    console_capture.stop_capture()
-
-    # Clean up temporary files
-    run_manager.cleanup_temp_files(run_id)
-
-    print(f"\n✓ Run {run_id} completed successfully!")
-    return final_summary, results, run_id
 
 
 def print_summary(summary: Dict[str, Any]) -> None:
@@ -956,6 +747,11 @@ def generate_comprehensive_summary(summary: Dict[str, Any], results: List[Dict[s
     output.append("=" * 80)
     output.append(f"Run ID: {summary.get('run_id', 'unknown')}")
     output.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    # Add agent configuration information if available
+    if summary.get('agent_config_id'):
+        output.append(f"Agent Config ID: {summary['agent_config_id']}")
+    
     output.append("")
     
     # Basic statistics section
@@ -974,6 +770,19 @@ def generate_comprehensive_summary(summary: Dict[str, Any], results: List[Dict[s
     if summary['successful_runs'] > 0:
         output.append(f"Total steps taken:         {summary['total_steps']}")
         output.append(f"Average steps per question:{summary['average_steps']:.1f}")
+    
+    # Calculate and display overall score if we have an agent config
+    if summary.get('agent_config_id'):
+        try:
+            import sys
+            import os
+            sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+            from config_manager import AgentConfigManager
+            config_manager = AgentConfigManager()
+            score = config_manager.calculate_score(summary)
+            output.append(f"Overall score:             {score:.3f}")
+        except Exception:
+            output.append(f"Overall score:             Unable to calculate")
     
     # Add detailed question table
     output.append("")
@@ -1039,6 +848,30 @@ def generate_comprehensive_summary(summary: Dict[str, Any], results: List[Dict[s
     
     output.append(f"- Overall assessment: {assessment} ({success_rate:.1f}% success rate)")
     
+    # Add score-based insights if we have an agent config
+    if summary.get('agent_config_id'):
+        try:
+            import sys
+            import os
+            sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+            from config_manager import AgentConfigManager
+            config_manager = AgentConfigManager()
+            score = config_manager.calculate_score(summary)
+            
+            # Provide additional insights based on score
+            if score >= 1.5:
+                output.append(f"- Score-based assessment: Outstanding performance ({score:.3f})")
+            elif score >= 1.0:
+                output.append(f"- Score-based assessment: Very good performance ({score:.3f})")
+            elif score >= 0.5:
+                output.append(f"- Score-based assessment: Good performance ({score:.3f})")
+            elif score >= 0.2:
+                output.append(f"- Score-based assessment: Moderate performance ({score:.3f})")
+            else:
+                output.append(f"- Score-based assessment: Needs significant improvement ({score:.3f})")
+        except Exception:
+            output.append(f"- Score-based assessment: Unable to calculate")
+    
     return "\n".join(output)
 
 
@@ -1097,8 +930,350 @@ def list_available_runs(output_dir: str = "testing/results") -> None:
         print("-" * 60)
 
 
-def main(
-    questions_file: str = "testing/questions/questions.jsonl",
+def list_configurations_sorted_by_score(config_manager: AgentConfigManager) -> None:
+    """List all agent configurations sorted by best score (highest to lowest)."""
+    configs = config_manager.list_configs()
+
+    if not configs:
+        print("No agent configurations found.")
+        return
+
+    # Sort by best_score (highest first), None values last
+    sorted_configs = sorted(
+        configs,
+        key=lambda x: (x.get('best_score') is None, x.get('best_score') or 0),
+        reverse=True
+    )
+
+    print("\n" + "=" * 100)
+    print("AGENT CONFIGURATIONS (Sorted by Best Score)")
+    print("=" * 100)
+
+    for i, config in enumerate(sorted_configs, 1):
+        best_score = config.get('best_score')
+        best_score_str = f'{best_score:.3f}' if best_score is not None else 'Not tested'
+        best_run_id = config.get('best_run_id', 'N/A')
+        total_runs = config.get('total_runs', 0)
+        last_run = config.get('last_run_at', 'Never')
+
+        print(f"{i:2d}. {config['name']}")
+        print(f"    ID:           {config['id']}")
+        print(f"    Model:        {config['model']}")
+        print(f"    Max Steps:    {config['max_steps']}")
+        print(f"    Best Score:   {best_score_str}")
+        print(f"    Best Run ID:  {best_run_id}")
+        print(f"    Total Runs:   {total_runs}")
+        print(f"    Last Run:     {last_run}")
+        print(f"    Description:  {config['description']}")
+        print("-" * 100)
+
+    print(f"\nTotal configurations: {len(sorted_configs)}")
+    tested_configs = sum(1 for c in sorted_configs if c.get('best_score') is not None)
+    print(f"Tested configurations: {tested_configs}")
+    if tested_configs > 0:
+        avg_score = sum(c.get('best_score', 0) for c in sorted_configs if c.get('best_score') is not None) / tested_configs
+        print(f"Average best score: {avg_score:.3f}")
+
+
+def list_runs_sorted_by_score(output_dir: str = "testing/results") -> None:
+    """List all runs sorted by score (highest to lowest)."""
+    import re
+
+    def extract_score_from_summary(summary_file):
+        """Extract score from FINAL_SUMMARY.txt."""
+        try:
+            with open(summary_file, 'r') as f:
+                content = f.read()
+            # Look for 'Overall score:' line
+            match = re.search(r'Overall score:\s*([\d.]+)', content)
+            if match:
+                return float(match.group(1))
+        except:
+            pass
+        return None
+
+    def extract_config_id_from_summary(summary_file):
+        """Extract config ID from FINAL_SUMMARY.txt."""
+        try:
+            with open(summary_file, 'r') as f:
+                content = f.read()
+            # Look for 'Agent Config ID:' line
+            match = re.search(r'Agent Config ID:\s*(\w+)', content)
+            if match:
+                return match.group(1)
+        except:
+            pass
+        return None
+
+    def get_run_info(run_dir):
+        """Extract run information from directory."""
+        run_id = os.path.basename(run_dir)
+        summary_file = os.path.join(run_dir, 'FINAL_SUMMARY.txt')
+        checkpoint_file = os.path.join(run_dir, 'checkpoint.json')
+
+        info = {
+            'run_id': run_id,
+            'score': None,
+            'config_id': None,
+            'complete': False,
+            'path': run_dir
+        }
+
+        # Extract info from summary file
+        if os.path.exists(summary_file):
+            info['score'] = extract_score_from_summary(summary_file)
+            info['config_id'] = extract_config_id_from_summary(summary_file)
+            info['complete'] = True
+
+        # Extract config ID from checkpoint if not found in summary
+        elif os.path.exists(checkpoint_file):
+            try:
+                with open(checkpoint_file, 'r') as f:
+                    checkpoint = json.load(f)
+                info['config_id'] = checkpoint.get('agent_config_id')
+                info['complete'] = checkpoint.get('is_complete', False)
+            except:
+                pass
+
+        return info
+
+    if not os.path.exists(output_dir):
+        print(f"Results directory not found: {output_dir}")
+        return
+
+    run_dirs = [d for d in os.listdir(output_dir) if d.startswith('run_') and os.path.isdir(os.path.join(output_dir, d))]
+    runs_info = []
+
+    for run_dir_name in run_dirs:
+        run_path = os.path.join(output_dir, run_dir_name)
+        run_info = get_run_info(run_path)
+        runs_info.append(run_info)
+
+    if not runs_info:
+        print("No runs found.")
+        return
+
+    # Sort by score (highest first), None values last
+    sorted_runs = sorted(
+        runs_info,
+        key=lambda x: (x['score'] is None, -(x['score'] or 0))
+    )
+
+    print("\n" + "=" * 120)
+    print("TEST RUNS (Sorted by Score)")
+    print("=" * 120)
+
+    for i, run in enumerate(sorted_runs, 1):
+        score_str = f'{run["score"]:.3f}' if run['score'] is not None else 'No score'
+        status = '✓ COMPLETE' if run['complete'] else '⏸ INCOMPLETE'
+        config_id = run['config_id'] or 'Unknown'
+
+        print(f"{i:2d}. Run ID: {run['run_id']}")
+        print(f"    Status:       {status}")
+        print(f"    Score:        {score_str}")
+        print(f"    Config ID:    {config_id}")
+        print(f"    Path:         {run['path']}")
+        print("-" * 120)
+
+    completed_runs = sum(1 for r in sorted_runs if r['complete'])
+    scored_runs = sum(1 for r in sorted_runs if r['score'] is not None)
+
+    print(f"\nTotal runs found: {len(sorted_runs)}")
+    print(f"Completed runs: {completed_runs}")
+    print(f"Runs with scores: {scored_runs}")
+
+
+def print_system_summary(config_manager: AgentConfigManager, output_dir: str = "testing/results") -> None:
+    """Print a combined summary of configurations and their best runs."""
+    import re
+
+    configs = config_manager.list_configs()
+
+    if not configs:
+        print("No agent configurations found.")
+        return
+
+    # Sort configurations by best score
+    sorted_configs = sorted(
+        configs,
+        key=lambda x: (x.get('best_score') is None, x.get('best_score') or 0),
+        reverse=True
+    )
+
+    print("\n" + "=" * 120)
+    print("SYSTEM PERFORMANCE SUMMARY")
+    print("=" * 120)
+
+    for i, config in enumerate(sorted_configs, 1):
+        best_score = config.get('best_score')
+        best_score_str = f'{best_score:.3f}' if best_score is not None else 'Not tested'
+        best_run_id = config.get('best_run_id')
+
+        print(f"{i}. CONFIG: {config['name']}")
+        print(f"   Config ID:     {config['id']}")
+        print(f"   Model:         {config['model']}")
+        print(f"   Max Steps:     {config['max_steps']}")
+        print(f"   Best Score:    {best_score_str}")
+
+        if best_run_id:
+            print(f"   Best Run ID:   {best_run_id}")
+
+            # Try to get more info about the best run
+            run_path = os.path.join(output_dir, best_run_id)
+            summary_file = os.path.join(run_path, 'FINAL_SUMMARY.txt')
+
+            if os.path.exists(summary_file):
+                try:
+                    with open(summary_file, 'r') as f:
+                        content = f.read()
+
+                    # Extract key stats
+                    success_match = re.search(r'Success rate:\s*([\d.]+)%', content)
+                    accuracy_match = re.search(r'Accuracy rate:\s*([\d.]+)%', content)
+                    questions_match = re.search(r'Total questions:\s*(\d+)', content)
+
+                    if success_match:
+                        print(f"   Success Rate:  {success_match.group(1)}%")
+                    if accuracy_match:
+                        print(f"   Accuracy Rate: {accuracy_match.group(1)}%")
+                    if questions_match:
+                        print(f"   Questions:     {questions_match.group(1)}")
+
+                except:
+                    print(f"   Run details:   Could not read summary file")
+            else:
+                print(f"   Run details:   Summary file not found")
+        else:
+            print(f"   Best Run ID:   No runs yet")
+
+        print(f"   Total Runs:   {config.get('total_runs', 0)}")
+        print(f"   Last Run:     {config.get('last_run_at', 'Never')}")
+        print("-" * 120)
+
+    # Overall statistics
+    total_configs = len(sorted_configs)
+    tested_configs = sum(1 for c in sorted_configs if c.get('best_score') is not None)
+
+    print(f"\nOVERALL STATISTICS")
+    print(f"Total configurations: {total_configs}")
+    print(f"Tested configurations: {tested_configs}")
+
+    if tested_configs > 0:
+        scores = [c.get('best_score', 0) for c in sorted_configs if c.get('best_score') is not None]
+        avg_score = sum(scores) / len(scores)
+        best_overall = max(scores)
+        print(f"Average best score: {avg_score:.3f}")
+        print(f"Best overall score: {best_overall:.3f}")
+
+        # Best performing config
+        best_config = sorted_configs[0]
+        print(f"Best config: {best_config['name']} ({best_config['id']})")
+
+    # Run statistics
+    all_runs = []
+    if os.path.exists(output_dir):
+        run_dirs = [d for d in os.listdir(output_dir) if d.startswith('run_') and os.path.isdir(os.path.join(output_dir, d))]
+        all_runs = run_dirs
+
+    completed_runs = 0
+    scored_runs = 0
+
+    for run_dir in all_runs:
+        run_path = os.path.join(output_dir, run_dir)
+        summary_file = os.path.join(run_path, 'FINAL_SUMMARY.txt')
+        if os.path.exists(summary_file):
+            completed_runs += 1
+            scored_runs += 1
+
+    print(f"\nTotal runs: {len(all_runs)}")
+    print(f"Completed runs: {completed_runs}")
+    print(f"Runs with scores: {scored_runs}")
+
+
+
+
+def select_agent_config_interactive(config_manager: AgentConfigManager) -> Optional[str]:
+    """Interactive agent configuration selection."""
+    configs = config_manager.list_configs()
+
+    if not configs:
+        print("No agent configurations found. Please create one first.")
+        return None
+
+    print("\n" + "=" * 80)
+    print("AVAILABLE AGENT CONFIGURATIONS")
+    print("=" * 80)
+
+    for i, config in enumerate(configs, 1):
+        status = f"Best: {config['best_score']:.3f}" if config['best_score'] else "Not tested"
+        total_runs = config.get('total_runs', 0)
+        print(f"{i}. {config['name']}")
+        print(f"   Model: {config['model']}")
+        print(f"   Max Steps: {config['max_steps']}")
+        print(f"   Description: {config['description']}")
+        print(f"   Status: {status}")
+        print(f"   Runs: {total_runs}")
+        print("-" * 40)
+
+    while True:
+        try:
+            choice = input(f"\nSelect configuration (1-{len(configs)}) or 'q' to quit: ").strip()
+            if choice.lower() == 'q':
+                return None
+
+            choice_idx = int(choice) - 1
+            if 0 <= choice_idx < len(configs):
+                selected_config = configs[choice_idx]
+                print(f"\nSelected: {selected_config['name']}")
+                confirm = input("Confirm selection? (y/n): ").strip().lower()
+                if confirm == 'y':
+                    return selected_config['id']
+            else:
+                print("Invalid selection. Please try again.")
+        except ValueError:
+            print("Invalid input. Please enter a number or 'q'.")
+
+
+def select_run_to_resume_interactive(run_manager: RunManager) -> Optional[str]:
+    """Interactive run selection for resuming."""
+    runs = run_manager.list_runs()
+    incomplete_runs = [run for run in runs if not run["is_complete"]]
+
+    if not incomplete_runs:
+        print("No incomplete runs found.")
+        return None
+
+    print("\n" + "=" * 80)
+    print("INCOMPLETE RUNS TO RESUME")
+    print("=" * 80)
+
+    for i, run in enumerate(incomplete_runs, 1):
+        print(f"{i}. Run ID: {run['run_id']}")
+        print(f"   Progress: {run['current_question']}/{run['total_questions']} questions")
+        print(f"   Started: {run.get('start_time', 'Unknown')}")
+        print("-" * 40)
+
+    while True:
+        try:
+            choice = input(f"\nSelect run to resume (1-{len(incomplete_runs)}) or 'q' to quit: ").strip()
+            if choice.lower() == 'q':
+                return None
+
+            choice_idx = int(choice) - 1
+            if 0 <= choice_idx < len(incomplete_runs):
+                selected_run = incomplete_runs[choice_idx]
+                print(f"\nSelected run: {selected_run['run_id']}")
+                confirm = input("Confirm selection? (y/n): ").strip().lower()
+                if confirm == 'y':
+                    return selected_run['run_id']
+            else:
+                print("Invalid selection. Please try again.")
+        except ValueError:
+            print("Invalid input. Please enter a number or 'q'.")
+
+
+def run_complete_test(
+    questions_file: str,
     use_lmstudio: bool = True,
     max_steps: int = 10,
     limit: Optional[int] = None,
@@ -1107,105 +1282,394 @@ def main(
     resume_mode: bool = False,
     run_id: Optional[str] = None,
     list_runs: bool = False,
-    cleanup_checkpoints: bool = False
-) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    cleanup_checkpoints: bool = False,
+    agent_config_id: Optional[str] = None,
+    create_config: bool = False,
+    config_name: str = "",
+    config_model: str = "",
+    config_description: str = "",
+    custom_params: str = "",
+    list_configs: bool = False,
+    list_configs_sorted: bool = False,
+    list_runs_sorted: bool = False,
+    list_summary: bool = False
+) -> None:
     """
-    Main test execution function with checkpoint and resume support.
+    Main function to run complete testing with agent configuration management.
 
     Args:
         questions_file: Path to questions JSONL file
-        use_lmstudio: Whether to use LM Studio client
-        max_steps: Maximum steps per question
-        limit: Optional limit on number of questions
-        show_validation_details: Whether to show validation reasoning
-        output_dir: Directory to save output files
-        resume_mode: Whether to resume from an existing run
-        run_id: Specific run ID to resume (required if resume_mode=True)
-        list_runs: Whether to list available runs and exit
-        cleanup_checkpoints: Whether to clean up checkpoint files after completion
-
-    Returns:
-        Tuple of (summary, results)
+        use_lmstudio: Whether to use LM Studio
+        max_steps: Maximum steps for agent (overridden by config if agent_config_id provided)
+        limit: Limit number of questions to test
+        show_validation_details: Show detailed validation information
+        output_dir: Output directory for results
+        resume_mode: Whether to resume an incomplete run
+        run_id: Specific run ID to resume (if resume_mode=True)
+        list_runs: Whether to list available runs
+        cleanup_checkpoints: Whether to clean up checkpoints after completion
+        agent_config_id: Agent configuration ID to use
+        create_config: Whether to create a new configuration
+        config_name: Name for new configuration
+        config_model: Model for new configuration
+        config_description: Description for new configuration
+        custom_params: Custom parameters for new configuration
+        list_configs: Whether to list available configurations
+        list_configs_sorted: Whether to list configurations sorted by score
+        list_runs_sorted: Whether to list runs sorted by score
+        list_summary: Whether to show system performance summary
     """
-    # Handle list runs mode
-    if list_runs:
-        list_available_runs(output_dir)
-        return {}, []
 
-    # Initialize run manager
+    # Initialize managers
+    config_manager = AgentConfigManager()
     run_manager = RunManager(output_dir)
 
-    # Handle resume mode validation
-    if resume_mode and not run_id:
-        # List available runs and let user choose
-        runs = run_manager.list_runs()
-        incomplete_runs = [r for r in runs if not r["is_complete"]]
+    # Handle configuration management
+    if create_config:
+        if not all([config_name, config_model]):
+            print("Error: config_name and config_model are required when creating a config.")
+            return
 
-        if not incomplete_runs:
-            print("No incomplete runs found to resume.")
-            return {}, []
+        print(f"Creating new agent configuration...")
+        new_config_id = config_manager.create_config(
+            name=config_name,
+            model=config_model,
+            max_steps=max_steps,
+            description=config_description,
+            custom_params=custom_params
+        )
+        print(f"✓ Created configuration: {new_config_id}")
+        print(f"  Name: {config_name}")
+        print(f"  Model: {config_model}")
+        print(f"  Max Steps: {max_steps}")
+        if config_description:
+            print(f"  Description: {config_description}")
+        return
 
-        print("\n" + "=" * 80)
-        print("AVAILABLE RUNS TO RESUME")
-        print("=" * 80)
+    # Handle listing configurations
+    if list_configs:
+        configs = config_manager.list_configs()
+        if not configs:
+            print("No agent configurations found.")
+        else:
+            print("\n" + "=" * 80)
+            print("AGENT CONFIGURATIONS")
+            print("=" * 80)
+            for config in configs:
+                status = f"Best: {config['best_score']:.3f}" if config['best_score'] else "Not tested"
+                total_runs = config.get('total_runs', 0)
+                print(f"ID: {config['id']}")
+                print(f"Name: {config['name']}")
+                print(f"Model: {config['model']}")
+                print(f"Max Steps: {config['max_steps']}")
+                print(f"Description: {config['description']}")
+                print(f"Performance: {status}")
+                print(f"Total Runs: {total_runs}")
+                print("-" * 40)
+        return
 
-        for i, run in enumerate(incomplete_runs, 1):
-            print(f"{i}. {run['run_id']}")
-            print(f"   Status: Incomplete ({run['current_question']}/{run['total_questions']} questions)")
-            print(f"   Started: {run['start_time']}")
-            print(f"   Path: {run['path']}")
-            print()
+    # Handle listing runs
+    if list_runs:
+        list_available_runs(output_dir)
+        return
 
-        try:
-            choice = int(input(f"Select run to resume (1-{len(incomplete_runs)}): ")) - 1
-            if 0 <= choice < len(incomplete_runs):
-                run_id = incomplete_runs[choice]["run_id"]
-            else:
-                print("Invalid selection.")
-                return {}, []
-        except (ValueError, KeyboardInterrupt):
-            print("Invalid selection or cancelled.")
-            return {}, []
+    # Handle listing configurations sorted by score
+    if list_configs_sorted:
+        list_configurations_sorted_by_score(config_manager)
+        return
 
-    print("Comprehensive Agent Testing Suite")
-    print(f"Questions file: {questions_file}")
-    print(f"Max steps per question: {max_steps}")
-    if limit:
-        print(f"Testing limited to {limit} questions")
+    # Handle listing runs sorted by score
+    if list_runs_sorted:
+        list_runs_sorted_by_score(output_dir)
+        return
+
+    # Handle system summary
+    if list_summary:
+        print_system_summary(config_manager, output_dir)
+        return
+
+    # Handle run resumption
     if resume_mode:
-        print(f"Resume mode: ON (Run ID: {run_id})")
-    print("=" * 80)
+        if run_id:
+            # Use specific run ID
+            checkpoint = run_manager.load_checkpoint(run_id)
+            if not checkpoint:
+                print(f"Error: Run {run_id} not found or has no checkpoint.")
+                return
+            agent_config_id = checkpoint.get("agent_config_id")
+            if agent_config_id:
+                print(f"Resuming run {run_id} with saved configuration...")
+        else:
+            # Interactive selection
+            run_id = select_run_to_resume_interactive(run_manager)
+            if not run_id:
+                print("No run selected for resuming.")
+                return
 
-    # Run tests with checkpoint support
-    summary, results, actual_run_id = run_test_suite(
-        questions_file=questions_file,
-        use_lmstudio=use_lmstudio,
-        max_steps=max_steps,
-        limit=limit,
-        run_manager=run_manager,
-        run_id=run_id,
-        resume_mode=resume_mode
-    )
+            checkpoint = run_manager.load_checkpoint(run_id)
+            if checkpoint:
+                agent_config_id = checkpoint.get("agent_config_id")
+                print(f"Resuming run {run_id} with saved configuration...")
 
-    # Handle error case
-    if "error" in summary:
-        print(f"Error: {summary['error']}")
-        return summary, results
+    # Handle new run with configuration selection (only if not resuming)
+    elif not resume_mode and not agent_config_id:
+        agent_config_id = select_agent_config_interactive(config_manager)
+        if not agent_config_id:
+            print("No configuration selected. Exiting.")
+            return
 
-    # Print summary
-    print_summary(summary)
+    # Load the agent configuration
+    if agent_config_id:
+        config = config_manager.get_config(agent_config_id)
+        if not config:
+            print(f"Error: Agent configuration {agent_config_id} not found.")
+            return
 
-    # Print question table
-    print_question_table(results)
+        # Use config parameters
+        model_name = config["model"]
+        max_steps = config["max_steps"]
 
-    # Print detailed results
-    print_detailed_results(results, show_validation_details=show_validation_details)
+        print(f"\nUsing configuration: {config['name']}")
+        print(f"Model: {model_name}")
+        print(f"Max Steps: {max_steps}")
+        if config.get("description"):
+            print(f"Description: {config['description']}")
+    else:
+        # Use default parameters
+        model_name = "default-model"  # You might want to make this configurable
+        print(f"\nUsing default parameters:")
+        print(f"Max Steps: {max_steps}")
 
-    # Clean up checkpoint files if requested
-    if cleanup_checkpoints and actual_run_id:
-        run_manager.cleanup_checkpoints(actual_run_id)
+    # Load questions
+    if not os.path.exists(questions_file):
+        print(f"Error: Questions file {questions_file} not found.")
+        return
 
-    return summary, results
+    questions = load_questions_from_jsonl(questions_file)
+    if limit:
+        questions = questions[:limit]
+
+    print(f"\nLoaded {len(questions)} questions from {questions_file}")
+
+    # Build clients
+    try:
+        print("Building agent client...")
+        agent_client = build_client(use_lmstudio=use_lmstudio, config={"model": model_name})
+
+        print("Building validation client...")
+        validation_client = build_client(use_lmstudio=use_lmstudio, config={"model": model_name})
+
+    except Exception as e:
+        print(f"Error building clients: {e}")
+        return
+
+    # Initialize or resume run
+    if resume_mode and run_id:
+        # Resume existing run
+        checkpoint = run_manager.load_checkpoint(run_id)
+        if not checkpoint:
+            print(f"Error: No checkpoint found for run {run_id}")
+            return
+
+        start_question = checkpoint.get("current_question", 0)
+        results = checkpoint.get("results", [])
+
+        print(f"Resuming run {run_id} from question {start_question + 1}")
+    else:
+        # Start new run
+        run_id = run_manager.generate_run_id()
+        run_dir = run_manager.create_run_directory(run_id)
+        start_question = 0
+        results = []
+
+        print(f"Starting new run: {run_id}")
+        print(f"Output directory: {run_dir}")
+
+    # Setup console capture
+    console_capture = ConsoleCapture()
+    console_capture.start_capture()
+
+    # Run tests
+    try:
+        for i in range(start_question, len(questions)):
+            question = questions[i]
+            current_q = i + 1
+
+            print(f"\n{'='*60}")
+            print(f"QUESTION {current_q}/{len(questions)}")
+            print(f"{'='*60}")
+            print(f"Level: {question.get('Level', 'unknown')}")
+            print(f"Question: {question['Question'][:200]}{'...' if len(question['Question']) > 200 else ''}")
+
+            # Run single test
+            result = run_single_test(
+                question_data=question,
+                agent_client=agent_client,
+                validation_client=validation_client,
+                max_steps=max_steps
+            )
+
+            results.append(result)
+
+            # Print result summary
+            status = "✓ SUCCESS" if result['success'] else "✗ FAILED"
+            if result['success'] and result['is_correct']:
+                status += " (CORRECT)"
+            elif result['success']:
+                status += " (INCORRECT)"
+
+            print(f"Result: {status}")
+            print(f"Time: {result['execution_time']:.2f}s")
+            print(f"Steps: {result['steps_taken']}")
+
+            # Save checkpoint every 5 questions or at the end
+            if (current_q % 5 == 0) or (current_q == len(questions)):
+                # Calculate summary
+                summary = calculate_summary(results, len(questions))
+
+                # Save checkpoint
+                checkpoint_data = {
+                    "is_complete": current_q == len(questions),
+                    "current_question": current_q,
+                    "total_questions": len(questions),
+                    "start_time": datetime.now().isoformat(),
+                    "results": results
+                }
+
+                run_manager.save_checkpoint(run_id, checkpoint_data, agent_config_id)
+                run_manager.save_checkpoint_results(run_id, results, summary,
+                                                  console_capture.get_output(), agent_config_id)
+
+                print(f"✓ Checkpoint saved at question {current_q}")
+
+        # Final summary and results
+        console_capture.stop_capture()
+        final_output = console_capture.get_output()
+
+        summary = calculate_summary(results, len(questions))
+
+        # Update configuration performance
+        if agent_config_id:
+            score = config_manager.calculate_score(summary)
+            is_new_best = config_manager.update_config_performance(
+                agent_config_id, run_id, score, summary
+            )
+            if is_new_best:
+                print(f"\n🎉 NEW BEST SCORE for configuration {config['name']}: {score:.3f}")
+
+        # Save final results
+        run_manager.save_final_results(run_id, summary, results, final_output, agent_config_id)
+
+        # Cleanup if requested
+        if cleanup_checkpoints:
+            run_manager.cleanup_checkpoints(run_id)
+
+        run_manager.cleanup_temp_files(run_id)
+
+        # Print final summary
+        print_summary(summary)
+
+    except KeyboardInterrupt:
+        print(f"\n\n⚠ Testing interrupted by user at question {current_q}")
+        console_capture.stop_capture()
+
+        # Save checkpoint before exit
+        summary = calculate_summary(results, len(questions))
+        checkpoint_data = {
+            "is_complete": False,
+            "current_question": current_q - 1,  # We didn't complete the current question
+            "total_questions": len(questions),
+            "start_time": datetime.now().isoformat(),
+            "results": results
+        }
+
+        run_manager.save_checkpoint(run_id, checkpoint_data, agent_config_id)
+        run_manager.save_checkpoint_results(run_id, results, summary,
+                                          console_capture.get_output(), agent_config_id)
+
+        print(f"✓ Progress saved. Resume with run_id: {run_id}")
+
+    except Exception as e:
+        print(f"\n\n❌ ERROR: {e}")
+        console_capture.stop_capture()
+
+        # Save checkpoint before exit
+        summary = calculate_summary(results, len(questions))
+        checkpoint_data = {
+            "is_complete": False,
+            "current_question": current_q,
+            "total_questions": len(questions),
+            "start_time": datetime.now().isoformat(),
+            "results": results
+        }
+
+        run_manager.save_checkpoint(run_id, checkpoint_data, agent_config_id)
+        run_manager.save_checkpoint_results(run_id, results, summary,
+                                          console_capture.get_output(), agent_config_id)
+
+        print(f"✓ Progress saved. Resume with run_id: {run_id}")
+        raise
+
+
+def calculate_summary(results: List[Dict[str, Any]], total_questions: int) -> Dict[str, Any]:
+    """Calculate summary statistics from test results."""
+    successful_runs = sum(1 for r in results if r['success'])
+    failed_runs = total_questions - successful_runs
+    correct_answers = sum(1 for r in results if r['is_correct'])
+    incorrect_answers = successful_runs - correct_answers
+
+    total_execution_time = sum(r['execution_time'] for r in results if r['execution_time'])
+    total_steps = sum(r['steps_taken'] for r in results if r['steps_taken'])
+
+    # Calculate rates
+    success_rate = (successful_runs / total_questions * 100) if total_questions > 0 else 0
+    accuracy_rate = (correct_answers / successful_runs * 100) if successful_runs > 0 else 0
+    average_execution_time = total_execution_time / successful_runs if successful_runs > 0 else 0
+    average_steps = total_steps / successful_runs if successful_runs > 0 else 0
+
+    # Failure breakdown
+    failure_breakdown = {}
+    for result in results:
+        if not result['success']:
+            failure_type = result.get('failure_type', 'unknown')
+            failure_breakdown[failure_type] = failure_breakdown.get(failure_type, 0) + 1
+
+    # Level statistics
+    level_stats = {}
+    for result in results:
+        level = result.get('question_level', 'unknown')
+        if level not in level_stats:
+            level_stats[level] = {
+                'total': 0,
+                'successful_runs': 0,
+                'correct_answers': 0
+            }
+        level_stats[level]['total'] += 1
+        if result['success']:
+            level_stats[level]['successful_runs'] += 1
+        if result['is_correct']:
+            level_stats[level]['correct_answers'] += 1
+
+    return {
+        'total_questions': total_questions,
+        'successful_runs': successful_runs,
+        'failed_runs': failed_runs,
+        'correct_answers': correct_answers,
+        'incorrect_answers': incorrect_answers,
+        'success_rate': success_rate,
+        'accuracy_rate': accuracy_rate,
+        'total_execution_time': total_execution_time,
+        'average_execution_time': average_execution_time,
+        'total_steps': total_steps,
+        'average_steps': average_steps,
+        'failure_breakdown': failure_breakdown,
+        'level_stats': level_stats
+    }
+
+
+def main(**kwargs) -> None:
+    """Wrapper function for backward compatibility."""
+    run_complete_test(**kwargs)
 
 
 if __name__ == "__main__":
@@ -1213,50 +1677,69 @@ if __name__ == "__main__":
 
     # Example usage modes:
 
-    # 1. Start a new run (default)
+    # 1. Start a new run with agent configuration
     # main(
-    #     questions_file="testing/questions_2.jsonl",
+    #     questions_file="testing/questions/questions.jsonl",
     #     use_lmstudio=True,
     #     max_steps=10,
     #     limit=None,  # Set to a number to test fewer questions
     #     show_validation_details=True,
     #     output_dir="testing/results",
     #     resume_mode=False,
-    #     cleanup_checkpoints=False  # Set to True to clean up checkpoints after completion
+    #     cleanup_checkpoints=False,  # Set to True to clean up checkpoints after completion
+    #     agent_config_id="config_001"  # Use a specific agent configuration
     # )
 
-    # 2. List available runs
+    # 2. Create a new agent configuration
+    # main(
+    #     create_config=True,
+    #     config_name="GPT-4o Test Config",
+    #     config_model="gpt-4o-mini",
+    #     config_description="Testing configuration with GPT-4o-mini model",
+    #     max_steps=15
+    # )
+
+    # 3. List available agent configurations
+    # main(list_configs=True)
+
+    # 4. List available runs
     # main(list_runs=True, output_dir="testing/results")
 
-    # 3. Resume a specific run
+    # 5. Resume a specific run with agent configuration
     # main(
-    #     questions_file="testing/questions_2.jsonl",
+    #     questions_file="testing/questions/questions.jsonl",
     #     use_lmstudio=True,
     #     max_steps=10,
     #     resume_mode=True,
     #     run_id="run_20250108_143022_abc12345",  # Specific run ID
-    #     output_dir="testing/results"
+    #     output_dir="testing/results",
+    #     agent_config_id="config_001"  # Agent configuration will be restored from checkpoint
     # )
 
-    # 4. Resume with interactive selection
+    # 6. Resume with interactive selection
     # main(
-    #     questions_file="testing/questions_2.jsonl",
+    #     questions_file="testing/questions/questions.jsonl",
     #     use_lmstudio=True,
     #     max_steps=10,
     #     resume_mode=True,  # Will prompt to select from incomplete runs
     #     output_dir="testing/results"
     # )
 
-    # Default: Start new run
+    # Default: Start new run with agent configuration tracking
     main(
         questions_file="testing/questions/questions.jsonl",
         use_lmstudio=True,
-        max_steps=10,
-        limit=1,  # Set to a number to test fewer questions
+        max_steps=50,
+        limit=None,  # Set to a number to test fewer questions
         show_validation_details=True,
         output_dir="testing/results",
         resume_mode=False,
         run_id=None,
         list_runs=False,
-        cleanup_checkpoints=False  # Set to True if you want to clean up checkpoint files after completion
+        cleanup_checkpoints=False,  # Set to True if you want to clean up checkpoint files after completion
+        agent_config_id=None,  # Set to a config ID to track performance
+        list_configs=False,  # List configurations (basic)
+        list_configs_sorted=False,  # List configurations sorted by score
+        list_runs_sorted=False,  # List runs sorted by score
+        list_summary=False  # Show system performance summary
     )
