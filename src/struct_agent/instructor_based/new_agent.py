@@ -190,7 +190,7 @@ def run_react_loop(query: str, client: Instructor, user_config: dict = {}) -> st
         if isinstance(thought, FinalAnswerTool):
             print(format_reasoning_outline(reasoning_outline))
             print("\n")
-            return thought.answer
+            return thought.answer, step_num
         
         if isinstance(thought, ThoughtTopic):
             thought_topic = thought.thought_topic
@@ -236,11 +236,11 @@ def run_react_loop(query: str, client: Instructor, user_config: dict = {}) -> st
     print(format_reasoning_outline(reasoning_outline))
     print("\n")
 
-    return f"Max steps ({config['max_steps']}) reached before final answer."
+    return f"Max steps ({config['max_steps']}) reached before final answer.", config['max_steps']
 
 if __name__ == "__main__":
     query = "What is the weather in the capital of France, and what is that city known for?"
 
     client = build_client()
-    answer = run_react_loop(query, client)
+    answer, step_num = run_react_loop(query, client)
     print("\nFinal Answer:", answer)

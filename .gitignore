@@ -90,3 +90,5 @@ AGENTS.md
 **/leann_index/
 
 /temp_tests
+/testing/results
+/testing/questions/*.jsonl
