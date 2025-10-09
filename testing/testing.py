@@ -269,18 +269,41 @@ class RunManager:
                     f.write(f"- Average time per successful question: {avg_time:.1f}s\n")
                     f.write(f"- Average steps per successful question: {avg_steps:.1f}\n")
                 
-                # Overall assessment
-                success_rate = summary['success_rate']
-                if success_rate >= 80:
-                    assessment = "Excellent performance"
-                elif success_rate >= 60:
-                    assessment = "Good performance"
-                elif success_rate >= 40:
-                    assessment = "Moderate performance"
+                # Overall assessment - use score-based if agent config available
+                if agent_config_id:
+                    try:
+                        import sys
+                        import os
+                        sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+                        from config_manager import AgentConfigManager
+                        config_manager = AgentConfigManager()
+                        score = config_manager.calculate_score(summary)
+                        assessment = get_score_assessment(score)
+                        f.write(f"- Score-based assessment: {assessment} ({score:.3f})\n")
+                    except Exception:
+                        # Fallback to success rate based assessment
+                        success_rate = summary['success_rate']
+                        if success_rate >= 80:
+                            assessment = "Excellent performance"
+                        elif success_rate >= 60:
+                            assessment = "Good performance"
+                        elif success_rate >= 40:
+                            assessment = "Moderate performance"
+                        else:
+                            assessment = "Needs improvement"
+                        f.write(f"- Overall assessment: {assessment} ({success_rate:.1f}% success rate)\n")
                 else:
-                    assessment = "Needs improvement"
-                
-                f.write(f"- Overall assessment: {assessment} ({success_rate:.1f}% success rate)\n")
+                    # Fallback to success rate based assessment
+                    success_rate = summary['success_rate']
+                    if success_rate >= 80:
+                        assessment = "Excellent performance"
+                    elif success_rate >= 60:
+                        assessment = "Good performance"
+                    elif success_rate >= 40:
+                        assessment = "Moderate performance"
+                    else:
+                        assessment = "Needs improvement"
+                    f.write(f"- Overall assessment: {assessment} ({success_rate:.1f}% success rate)\n")
 
             os.rename(temp_summary, summary_file)
 
@@ -612,6 +635,37 @@ def print_summary(summary: Dict[str, Any]) -> None:
             
             print(f"Level {level} ({level_total} questions): {success_rate:.1f}% success rate, {accuracy_rate:.1f}% accuracy rate")
 
+    # Add score-based assessment if we have an agent config
+    if summary.get('agent_config_id'):
+        try:
+            import sys
+            import os
+            sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+            from config_manager import AgentConfigManager
+            config_manager = AgentConfigManager()
+            score = config_manager.calculate_score(summary)
+
+            # Provide assessment based on score
+            if score >= 1.5:
+                assessment = "Outstanding performance"
+            elif score >= 1.0:
+                assessment = "Very good performance"
+            elif score >= 0.5:
+                assessment = "Good performance"
+            elif score >= 0.2:
+                assessment = "Moderate performance"
+            else:
+                assessment = "Needs significant improvement"
+
+            print("\n" + "=" * 80)
+            print("SCORE-BASED ASSESSMENT")
+            print("=" * 80)
+            print(f"Overall score:             {score:.3f}")
+            print(f"Performance assessment:   {assessment}")
+
+        except Exception:
+            pass
+
 def print_question_table(results: List[Dict[str, Any]]) -> None:
     """Print a detailed table of all questions with their results."""
     print("\n" + "=" * 80)
@@ -930,6 +984,22 @@ def list_available_runs(output_dir: str = "testing/results") -> None:
         print("-" * 60)
 
 
+def get_score_assessment(score: Optional[float]) -> str:
+    """Get performance assessment based on score."""
+    if score is None:
+        return "Not tested"
+    elif score >= 1.5:
+        return "Outstanding performance"
+    elif score >= 1.0:
+        return "Very good performance"
+    elif score >= 0.5:
+        return "Good performance"
+    elif score >= 0.2:
+        return "Moderate performance"
+    else:
+        return "Needs significant improvement"
+
+
 def list_configurations_sorted_by_score(config_manager: AgentConfigManager) -> None:
     """List all agent configurations sorted by best score (highest to lowest)."""
     configs = config_manager.list_configs()
@@ -952,6 +1022,7 @@ def list_configurations_sorted_by_score(config_manager: AgentConfigManager) -> N
     for i, config in enumerate(sorted_configs, 1):
         best_score = config.get('best_score')
         best_score_str = f'{best_score:.3f}' if best_score is not None else 'Not tested'
+        assessment = get_score_assessment(best_score)
         best_run_id = config.get('best_run_id', 'N/A')
         total_runs = config.get('total_runs', 0)
         last_run = config.get('last_run_at', 'Never')
@@ -960,7 +1031,7 @@ def list_configurations_sorted_by_score(config_manager: AgentConfigManager) -> N
         print(f"    ID:           {config['id']}")
         print(f"    Model:        {config['model']}")
         print(f"    Max Steps:    {config['max_steps']}")
-        print(f"    Best Score:   {best_score_str}")
+        print(f"    Best Score:   {best_score_str} ({assessment})")
         print(f"    Best Run ID:  {best_run_id}")
         print(f"    Total Runs:   {total_runs}")
         print(f"    Last Run:     {last_run}")
@@ -1107,13 +1178,14 @@ def print_system_summary(config_manager: AgentConfigManager, output_dir: str = "
     for i, config in enumerate(sorted_configs, 1):
         best_score = config.get('best_score')
         best_score_str = f'{best_score:.3f}' if best_score is not None else 'Not tested'
+        assessment = get_score_assessment(best_score)
         best_run_id = config.get('best_run_id')
 
         print(f"{i}. CONFIG: {config['name']}")
         print(f"   Config ID:     {config['id']}")
         print(f"   Model:         {config['model']}")
         print(f"   Max Steps:     {config['max_steps']}")
-        print(f"   Best Score:    {best_score_str}")
+        print(f"   Best Score:    {best_score_str} ({assessment})")
 
         if best_run_id:
             print(f"   Best Run ID:   {best_run_id}")

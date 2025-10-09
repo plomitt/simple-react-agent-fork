@@ -170,7 +170,7 @@ class AgentConfigManager:
             return 0.0
 
         # Base score from success rate
-        base_score = success_rate
+        base_score = success_rate / 100
 
         # Accuracy bonus (only counts if there are successful runs)
         accuracy_bonus = 0.0
