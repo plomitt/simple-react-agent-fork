@@ -66,6 +66,10 @@ def main():
     parser.add_argument('--containers-to-restart', default=os.getenv('CONTAINERS_TO_RESTART', 'redis,searxng,caddy'),
                        help='Comma-separated list of container names to restart (env: CONTAINERS_TO_RESTART, default: redis,searxng,caddy)')
 
+    # Manual mode argument
+    parser.add_argument('--manual-mode', action='store_true',
+                       help='Enable manual mode for interactive review of agent answers')
+
     args = parser.parse_args()
 
     # Parse containers list
@@ -97,7 +101,8 @@ def main():
         'list_runs_sorted': args.list_runs_sorted,
         'list_summary': args.list_summary,
         'restart_searxng': args.restart_searxng,
-        'containers_to_restart': containers_to_restart
+        'containers_to_restart': containers_to_restart,
+        'manual_mode': args.manual_mode
     }
 
     # Validate create_config arguments

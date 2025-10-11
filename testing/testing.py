@@ -167,6 +167,206 @@ class ConsoleCapture:
         self.buffer = io.StringIO()
 
 
+class ManualModeManager:
+    """Manages manual mode operations for interactive testing review."""
+
+    def __init__(self):
+        self.manual_overrides = {}
+        self.question_redo_count = {}
+        self.paused_questions = set()
+
+    def display_answer_comparison(self, result: Dict[str, Any]) -> None:
+        """Display a side-by-side comparison of agent answer vs expected answer."""
+        print("\n" + "=" * 100)
+        print("📋 MANUAL REVIEW - ANSWER COMPARISON")
+        print("=" * 100)
+
+        # Question info
+        print(f"Question #{result.get('question_number', '?')}")
+        print(f"Level: {result.get('question_level', 'unknown')}")
+        print(f"Question: {result.get('question', '')}")
+        print("-" * 100)
+
+        # Agent answer
+        print("\n🤖 AGENT'S ANSWER:")
+        print("-" * 50)
+        if result['success']:
+            print(f"{result['agent_answer']}")
+        else:
+            print(f"❌ FAILED: {result.get('error', 'Unknown error')}")
+
+        # Expected answer
+        print("\n✅ EXPECTED ANSWER:")
+        print("-" * 50)
+        print(f"{result['expected_answer']}")
+
+        # Validator decision
+        if result['success']:
+            validator_correct = result['is_correct']
+            validator_status = "✅ CORRECT" if validator_correct else "❌ INCORRECT"
+            print(f"\n🧠 VALIDATOR DECISION: {validator_status}")
+
+            if result.get('validation_reasoning'):
+                print(f"Reasoning: {result['validation_reasoning']}")
+
+        # Performance info
+        if result.get('execution_time'):
+            print(f"\n⏱️  Execution time: {result['execution_time']:.2f}s")
+        if result.get('steps_taken'):
+            print(f"🔄 Steps taken: {result['steps_taken']}")
+
+        print("=" * 100)
+
+    def get_user_decision(self, result: Dict[str, Any]) -> Tuple[str, Optional[bool]]:
+        """Get user's decision about the current answer."""
+        if not result['success']:
+            print("\n❌ Agent failed to provide an answer.")
+            print("What would you like to do?")
+            print("1. Redo this question")
+            print("2. Skip to next question")
+            print("3. Pause and exit (will save progress)")
+            print("4. Stop testing completely")
+        else:
+            validator_correct = result['is_correct']
+            validator_status = "✅ CORRECT" if validator_correct else "❌ INCORRECT"
+            print(f"\n🧠 Validator says: {validator_status}")
+            print("\nWhat do you think?")
+            print("1. Accept validator's decision")
+            print("2. Override: Mark as CORRECT")
+            print("3. Override: Mark as INCORRECT")
+            print("4. Redo this question")
+            print("5. Skip to next question")
+            print("6. Pause and exit (will save progress)")
+            print("7. Stop testing completely")
+
+        while True:
+            try:
+                choice = input("\nEnter your choice (1-7): ").strip()
+
+                if not result['success']:
+                    if choice == '1':
+                        return 'redo', None
+                    elif choice == '2':
+                        return 'next', None
+                    elif choice == '3':
+                        return 'pause', None
+                    elif choice == '4':
+                        return 'stop', None
+                else:
+                    if choice == '1':
+                        return 'accept', result['is_correct']
+                    elif choice == '2':
+                        return 'override', True
+                    elif choice == '3':
+                        return 'override', False
+                    elif choice == '4':
+                        return 'redo', None
+                    elif choice == '5':
+                        return 'next', None
+                    elif choice == '6':
+                        return 'pause', None
+                    elif choice == '7':
+                        return 'stop', None
+
+                print("Invalid choice. Please enter a number from the list.")
+
+            except KeyboardInterrupt:
+                print("\n\n⚠ Detected keyboard interrupt...")
+                return 'pause', None
+            except EOFError:
+                print("\n\n⚠ Detected EOF...")
+                return 'pause', None
+
+    def apply_manual_decision(self, result: Dict[str, Any], decision: str, manual_correct: Optional[bool], question_number: int) -> Dict[str, Any]:
+        """Apply the user's manual decision to the result."""
+        # Track manual overrides
+        question_key = f"q_{question_number}"
+
+        if decision == 'override' and manual_correct is not None:
+            # User is overriding the validator
+            original_correct = result['is_correct']
+            result['is_correct'] = manual_correct
+            result['manual_override'] = True
+            result['original_correct'] = original_correct
+
+            self.manual_overrides[question_key] = {
+                'final_correct': manual_correct,
+                'original_correct': original_correct,
+                'overridden': True
+            }
+
+            status = "✅ CORRECT (Manual override)" if manual_correct else "❌ INCORRECT (Manual override)"
+            print(f"\n📝 Applied manual override: {status}")
+
+        elif decision == 'accept':
+            # User accepts validator's decision
+            result['manual_override'] = False
+            result['original_correct'] = result['is_correct']
+
+            self.manual_overrides[question_key] = {
+                'final_correct': result['is_correct'],
+                'original_correct': result['is_correct'],
+                'overridden': False
+            }
+
+            print(f"\n✅ Accepted validator's decision")
+
+        elif decision == 'redo':
+            # Track redo count
+            self.question_redo_count[question_key] = self.question_redo_count.get(question_key, 0) + 1
+            print(f"\n🔄 Will redo this question (attempt #{self.question_redo_count[question_key] + 1})")
+
+        elif decision == 'pause':
+            # Track paused question
+            self.paused_questions.add(question_number)
+            print(f"\n⏸ Paused at question {question_number}")
+
+        return result
+
+    def should_redo_question(self, decision: str) -> bool:
+        """Check if the user wants to redo the current question."""
+        return decision == 'redo'
+
+    def should_pause(self, decision: str) -> bool:
+        """Check if the user wants to pause."""
+        return decision == 'pause'
+
+    def should_stop(self, decision: str) -> bool:
+        """Check if the user wants to stop completely."""
+        return decision == 'stop'
+
+    def get_manual_stats(self) -> Dict[str, Any]:
+        """Get statistics about manual mode usage."""
+        total_overrides = len([o for o in self.manual_overrides.values() if o['overridden']])
+        total_redos = sum(self.question_redo_count.values())
+        total_pauses = len(self.paused_questions)
+
+        return {
+            'total_manual_overrides': total_overrides,
+            'total_redos': total_redos,
+            'total_pauses': total_pauses,
+            'override_details': self.manual_overrides,
+            'redo_count': self.question_redo_count,
+            'paused_questions': list(self.paused_questions)
+        }
+
+    def display_progress_summary(self, current_question: int, total_questions: int, results: List[Dict[str, Any]]) -> None:
+        """Display a summary of current progress in manual mode."""
+        print(f"\n📊 PROGRESS SUMMARY")
+        print(f"Questions reviewed: {current_question}/{total_questions}")
+
+        # Count manual overrides
+        overrides = len([r for r in results if r.get('manual_override')])
+        if overrides > 0:
+            print(f"Manual overrides applied: {overrides}")
+
+        # Count correct answers after manual review
+        correct_answers = sum(1 for r in results if r.get('is_correct'))
+        if current_question > 0:
+            accuracy = (correct_answers / current_question * 100)
+            print(f"Current accuracy: {accuracy:.1f}%")
+
+
 class RunManager:
     """Manages test runs with checkpoint and resume functionality."""
 
@@ -658,7 +858,12 @@ def run_single_test(
         "steps_taken": None,
         "validation_reasoning": None,
         "failure_type": None,
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now().isoformat(),
+        # Manual mode fields
+        "manual_override": False,
+        "original_correct": None,
+        "question_number": None,
+        "redo_attempt": 0
     }
 
     try:
@@ -753,6 +958,32 @@ def print_summary(summary: Dict[str, Any]) -> None:
             accuracy_rate = (level_correct / level_total * 100) if level_total > 0 else 0
             
             print(f"Level {level} ({level_total} questions): {success_rate:.1f}% success rate, {accuracy_rate:.1f}% accuracy rate")
+
+    # Print manual mode statistics if applicable
+    if summary.get('manual_mode_enabled'):
+        print("\n" + "=" * 80)
+        print("MANUAL MODE STATISTICS")
+        print("=" * 80)
+
+        manual_overrides = summary.get('manual_overrides', 0)
+        corrected_by_manual = summary.get('corrected_by_manual', 0)
+        changed_to_incorrect = summary.get('changed_to_incorrect', 0)
+
+        print(f"Manual overrides applied:  {manual_overrides}")
+        if manual_overrides > 0:
+            print(f"  Changed to correct:     {corrected_by_manual}")
+            print(f"  Changed to incorrect:  {changed_to_incorrect}")
+
+        # Additional manual mode stats if available
+        manual_stats = summary.get('manual_stats')
+        if manual_stats:
+            total_redos = manual_stats.get('total_redos', 0)
+            total_pauses = manual_stats.get('total_pauses', 0)
+
+            if total_redos > 0:
+                print(f"Total question redos:      {total_redos}")
+            if total_pauses > 0:
+                print(f"Total pauses taken:       {total_pauses}")
 
     # Add score-based assessment if we have an agent config
     if summary.get('agent_config_id'):
@@ -1007,7 +1238,31 @@ def generate_comprehensive_summary(summary: Dict[str, Any], results: List[Dict[s
         avg_steps = summary['average_steps']
         output.append(f"- Average time per successful question: {avg_time:.1f}s")
         output.append(f"- Average steps per successful question: {avg_steps:.1f}")
-    
+
+    # Manual mode insights
+    if summary.get('manual_mode_enabled'):
+        manual_overrides = summary.get('manual_overrides', 0)
+        corrected_by_manual = summary.get('corrected_by_manual', 0)
+        changed_to_incorrect = summary.get('changed_to_incorrect', 0)
+
+        if manual_overrides > 0:
+            output.append(f"- Manual overrides applied: {manual_overrides} ({(manual_overrides/summary['total_questions']*100):.1f}% of questions)")
+            if corrected_by_manual > 0:
+                output.append(f"  - Changed to correct: {corrected_by_manual} answers")
+            if changed_to_incorrect > 0:
+                output.append(f"  - Changed to incorrect: {changed_to_incorrect} answers")
+
+        # Additional manual mode stats
+        manual_stats = summary.get('manual_stats')
+        if manual_stats:
+            total_redos = manual_stats.get('total_redos', 0)
+            total_pauses = manual_stats.get('total_pauses', 0)
+
+            if total_redos > 0:
+                output.append(f"- Total question redos: {total_redos}")
+            if total_pauses > 0:
+                output.append(f"- Total pauses taken: {total_pauses}")
+
     # Overall assessment
     success_rate = summary['success_rate']
     if success_rate >= 80:
@@ -1485,7 +1740,8 @@ def run_complete_test(
     list_runs_sorted: bool = False,
     list_summary: bool = False,
     restart_searxng: bool = False,
-    containers_to_restart: List[str] = None
+    containers_to_restart: List[str] = None,
+    manual_mode: bool = False
 ) -> None:
     """
     Main function to run complete testing with agent configuration management.
@@ -1513,6 +1769,7 @@ def run_complete_test(
         list_summary: Whether to show system performance summary
         restart_searxng: Whether to restart search containers before each question
         containers_to_restart: List of container names to restart (default: ["redis", "searxng", "caddy"])
+        manual_mode: Whether to enable manual mode for interactive answer review
     """
 
     # Initialize managers
@@ -1678,7 +1935,24 @@ def run_complete_test(
         start_question = checkpoint.get("current_question", 0)
         results = checkpoint.get("results", [])
 
+        # Check if this was a manual mode run
+        was_manual_mode = checkpoint.get("manual_mode", False)
+        if was_manual_mode and not manual_mode:
+            print(f"⚠ Warning: This run was created in manual mode, but manual mode is not enabled")
+            print(f"  Consider using --manual-mode to properly resume")
+        elif manual_mode and not was_manual_mode:
+            print(f"ℹ Note: Resuming non-manual run in manual mode")
+
         print(f"Resuming run {run_id} from question {start_question + 1}")
+        if was_manual_mode:
+            print(f"  (Original run was in manual mode)")
+
+        # Restore manual mode stats if available
+        if manual_mode:
+            manual_stats = checkpoint.get("manual_stats", {})
+            if manual_stats:
+                print(f"  Restoring manual mode data...")
+                # We'll restore this after initializing the manager
     else:
         # Start new run
         run_id = run_manager.generate_run_id()
@@ -1692,6 +1966,30 @@ def run_complete_test(
     # Setup console capture
     console_capture = ConsoleCapture()
     console_capture.start_capture()
+
+    # Initialize manual mode manager if needed
+    manual_mode_manager = ManualModeManager() if manual_mode else None
+
+    # Restore manual mode data if resuming
+    if manual_mode and manual_mode_manager and resume_mode and run_id:
+        manual_stats = checkpoint.get("manual_stats", {})
+        if manual_stats:
+            manual_mode_manager.manual_overrides = manual_stats.get("override_details", {})
+            manual_mode_manager.question_redo_count = manual_stats.get("redo_count", {})
+            manual_mode_manager.paused_questions = set(manual_stats.get("paused_questions", []))
+
+            # Display restored stats
+            total_overrides = manual_stats.get("total_manual_overrides", 0)
+            total_redos = manual_stats.get("total_redos", 0)
+            if total_overrides > 0 or total_redos > 0:
+                print(f"  ✓ Restored {total_overrides} manual overrides and {total_redos} redo attempts")
+
+    # Display manual mode status
+    if manual_mode:
+        print(f"\n🎯 MANUAL MODE ENABLED")
+        print(f"   You will review each answer and can override validator decisions")
+        print(f"   Use Ctrl+C at any time to pause and save progress")
+        print(f"   Your manual decisions will be saved and can be resumed")
 
     # Run tests
     try:
@@ -1731,23 +2029,57 @@ def run_complete_test(
                 max_steps=max_steps
             )
 
+            # Add question number for manual mode tracking
+            result['question_number'] = current_q
+
+            # Handle manual mode review
+            if manual_mode:
+                manual_mode_manager.display_answer_comparison(result)
+                decision, manual_correct = manual_mode_manager.get_user_decision(result)
+
+                # Apply manual decision
+                result = manual_mode_manager.apply_manual_decision(result, decision, manual_correct, current_q)
+
+                # Handle user decisions
+                if manual_mode_manager.should_redo_question(decision):
+                    # Redo the current question (decrement i to retry)
+                    i -= 1
+                    print(f"\n🔄 Redoing question {current_q}...")
+                    continue
+                elif manual_mode_manager.should_pause(decision):
+                    # Save and exit
+                    print(f"\n⏸ Pausing at question {current_q}...")
+                    break
+                elif manual_mode_manager.should_stop(decision):
+                    # Stop completely
+                    print(f"\n🛑 Stopping test at question {current_q}...")
+                    break
+                else:
+                    # Continue to next question
+                    if decision in ['accept', 'override']:
+                        manual_mode_manager.display_progress_summary(current_q, len(questions), results)
+                    print(f"\n➡️ Moving to next question...")
+
             results.append(result)
 
-            # Print result summary
-            status = "✓ SUCCESS" if result['success'] else "✗ FAILED"
-            if result['success'] and result['is_correct']:
-                status += " (CORRECT)"
-            elif result['success']:
-                status += " (INCORRECT)"
+            # Print result summary (non-manual mode)
+            if not manual_mode:
+                status = "✓ SUCCESS" if result['success'] else "✗ FAILED"
+                if result['success'] and result['is_correct']:
+                    status += " (CORRECT)"
+                elif result['success']:
+                    status += " (INCORRECT)"
 
-            print(f"Result: {status}")
-            print(f"Time: {result['execution_time']:.2f}s")
-            print(f"Steps: {result['steps_taken']}")
+                print(f"Result: {status}")
+                print(f"Time: {result['execution_time']:.2f}s")
+                print(f"Steps: {result['steps_taken']}")
 
-            # Save checkpoint every 5 questions or at the end
-            if (current_q % 5 == 0) or (current_q == len(questions)):
+            # Save checkpoint every 5 questions or at the end (or in manual mode after each decision)
+            save_checkpoint = (current_q % 5 == 0) or (current_q == len(questions)) or manual_mode
+
+            if save_checkpoint:
                 # Calculate summary
-                summary = calculate_summary(results, len(questions))
+                summary = calculate_summary(results, len(questions), manual_mode_manager)
 
                 # Save checkpoint
                 checkpoint_data = {
@@ -1755,20 +2087,28 @@ def run_complete_test(
                     "current_question": current_q,
                     "total_questions": len(questions),
                     "start_time": datetime.now().isoformat(),
-                    "results": results
+                    "results": results,
+                    "manual_mode": manual_mode
                 }
+
+                # Add manual mode data if applicable
+                if manual_mode and manual_mode_manager:
+                    checkpoint_data["manual_stats"] = manual_mode_manager.get_manual_stats()
 
                 run_manager.save_checkpoint(run_id, checkpoint_data, agent_config_id)
                 run_manager.save_checkpoint_results(run_id, results, summary,
                                                   console_capture.get_output(), agent_config_id)
 
-                print(f"✓ Checkpoint saved at question {current_q}")
+                if manual_mode:
+                    print(f"✓ Progress saved at question {current_q}")
+                else:
+                    print(f"✓ Checkpoint saved at question {current_q}")
 
         # Final summary and results
         console_capture.stop_capture()
         final_output = console_capture.get_output()
 
-        summary = calculate_summary(results, len(questions))
+        summary = calculate_summary(results, len(questions), manual_mode_manager)
 
         # Update configuration performance
         if agent_config_id:
@@ -1792,48 +2132,65 @@ def run_complete_test(
         print_summary(summary)
 
     except KeyboardInterrupt:
-        print(f"\n\n⚠ Testing interrupted by user at question {current_q}")
+        if manual_mode:
+            print(f"\n\n⚠ Manual mode interrupted by user at question {current_q}")
+        else:
+            print(f"\n\n⚠ Testing interrupted by user at question {current_q}")
         console_capture.stop_capture()
 
         # Save checkpoint before exit
-        summary = calculate_summary(results, len(questions))
+        summary = calculate_summary(results, len(questions), manual_mode_manager)
         checkpoint_data = {
             "is_complete": False,
             "current_question": current_q - 1,  # We didn't complete the current question
             "total_questions": len(questions),
             "start_time": datetime.now().isoformat(),
-            "results": results
+            "results": results,
+            "manual_mode": manual_mode
         }
+
+        # Add manual mode stats if applicable
+        if manual_mode and manual_mode_manager:
+            checkpoint_data["manual_stats"] = manual_mode_manager.get_manual_stats()
 
         run_manager.save_checkpoint(run_id, checkpoint_data, agent_config_id)
         run_manager.save_checkpoint_results(run_id, results, summary,
                                           console_capture.get_output(), agent_config_id)
 
         print(f"✓ Progress saved. Resume with run_id: {run_id}")
+        if manual_mode:
+            print(f"  Use --manual-mode --resume --run-id {run_id} to resume in manual mode")
 
     except Exception as e:
         print(f"\n\n❌ ERROR: {e}")
         console_capture.stop_capture()
 
         # Save checkpoint before exit
-        summary = calculate_summary(results, len(questions))
+        summary = calculate_summary(results, len(questions), manual_mode_manager)
         checkpoint_data = {
             "is_complete": False,
             "current_question": current_q,
             "total_questions": len(questions),
             "start_time": datetime.now().isoformat(),
-            "results": results
+            "results": results,
+            "manual_mode": manual_mode
         }
+
+        # Add manual mode stats if applicable
+        if manual_mode and manual_mode_manager:
+            checkpoint_data["manual_stats"] = manual_mode_manager.get_manual_stats()
 
         run_manager.save_checkpoint(run_id, checkpoint_data, agent_config_id)
         run_manager.save_checkpoint_results(run_id, results, summary,
                                           console_capture.get_output(), agent_config_id)
 
         print(f"✓ Progress saved. Resume with run_id: {run_id}")
+        if manual_mode:
+            print(f"  Use --manual-mode --resume --run-id {run_id} to resume in manual mode")
         raise
 
 
-def calculate_summary(results: List[Dict[str, Any]], total_questions: int) -> Dict[str, Any]:
+def calculate_summary(results: List[Dict[str, Any]], total_questions: int, manual_mode_manager: Optional[ManualModeManager] = None) -> Dict[str, Any]:
     """Calculate summary statistics from test results."""
     successful_runs = sum(1 for r in results if r['success'])
     failed_runs = total_questions - successful_runs
@@ -1872,6 +2229,16 @@ def calculate_summary(results: List[Dict[str, Any]], total_questions: int) -> Di
         if result['is_correct']:
             level_stats[level]['correct_answers'] += 1
 
+    # Manual mode statistics
+    manual_stats = None
+    if manual_mode_manager:
+        manual_stats = manual_mode_manager.get_manual_stats()
+
+    # Manual mode related counts from results
+    manual_overrides = sum(1 for r in results if r.get('manual_override', False))
+    corrected_by_manual = sum(1 for r in results if r.get('manual_override', False) and r.get('is_correct', False) and not r.get('original_correct', False))
+    changed_to_incorrect = sum(1 for r in results if r.get('manual_override', False) and not r.get('is_correct', False) and r.get('original_correct', False))
+
     return {
         'total_questions': total_questions,
         'successful_runs': successful_runs,
@@ -1885,7 +2252,13 @@ def calculate_summary(results: List[Dict[str, Any]], total_questions: int) -> Di
         'total_steps': total_steps,
         'average_steps': average_steps,
         'failure_breakdown': failure_breakdown,
-        'level_stats': level_stats
+        'level_stats': level_stats,
+        # Manual mode statistics
+        'manual_mode_enabled': manual_mode_manager is not None,
+        'manual_overrides': manual_overrides,
+        'corrected_by_manual': corrected_by_manual,
+        'changed_to_incorrect': changed_to_incorrect,
+        'manual_stats': manual_stats
     }
 
 
@@ -1976,5 +2349,6 @@ if __name__ == "__main__":
         list_runs_sorted=False,  # List runs sorted by score
         list_summary=False,  # Show system performance summary
         restart_searxng=True,  # Set to True to restart containers before each question
-        containers_to_restart=None  # Use default containers: ["redis", "searxng", "caddy"]
+        containers_to_restart=None,  # Use default containers: ["redis", "searxng", "caddy"]
+        manual_mode=False  # Set to True to enable manual mode for interactive review
     )
