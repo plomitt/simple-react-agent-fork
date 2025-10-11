@@ -8,27 +8,148 @@ import uuid
 import shutil
 import io
 import sys
+import time
 from typing import List, Dict, Any, Tuple, Optional
 from datetime import datetime
 from pydantic import BaseModel, Field
+import docker
 
-from struct_agent.instructor_based.new_agent import run_react_loop
+from struct_agent.instructor_based.new_agent import VERBOSITY_STANDARD, run_react_loop
 from struct_agent.instructor_based.client_manager import build_client
 from config_manager import AgentConfigManager
 
 
+# Docker Container Restart Feature
+#
+# This testing system includes functionality to automatically restart related Docker containers
+# before each test question to reset search engine request limits and prevent empty search results.
+#
+# Usage:
+#   1. Command line: poetry run python testing/cli.py --restart-searxng --agent-config-id <config_id>
+#   2. Environment variables: export RESTART_SEARCH_CONTAINERS=true
+#   3. Custom container list: --containers-to-restart redis,searxng,caddy,nginx
+#   4. Environment variable for containers: export CONTAINERS_TO_RESTART=redis,searxng,caddy
+#
+# The feature will:
+#   - Restart multiple containers that support search functionality (redis, searxng, caddy by default)
+#   - Use Docker Python SDK for reliable container operations
+#   - Log restart timing and status for each container
+#   - Continue testing even if some restarts fail (with warning)
+#   - Show clear status messages about restart operations
+#   - Handle Docker daemon connection issues gracefully
+
+
+def restart_search_containers(containers_to_restart: List[str] = None, timeout: int = 30) -> Dict[str, bool]:
+    """
+    Restart multiple Docker containers to reset search engine request limits.
+
+    Args:
+        containers_to_restart: List of container names to restart (default: ["redis", "searxng", "caddy"])
+        timeout: Maximum time to wait for container restart (default: 30 seconds)
+
+    Returns:
+        Dict[str, bool]: Dictionary mapping container names to their restart success status
+    """
+    if containers_to_restart is None:
+        containers_to_restart = ["redis", "searxng", "caddy"]
+
+    print(f"🔄 Restarting {len(containers_to_restart)} containers: {', '.join(containers_to_restart)}")
+
+    results = {}
+
+    try:
+        # Connect to Docker daemon (OrbStack uses the same socket)
+        client = docker.from_env()
+
+        # Test connection
+        client.ping()
+        print(f"  ✓ Connected to Docker daemon")
+
+    except docker.errors.DockerException as e:
+        print(f"  ❌ Error: Failed to connect to Docker daemon: {e}")
+        print(f"     Is Docker/OrbStack running and accessible?")
+        # Return failure for all containers
+        return {container: False for container in containers_to_restart}
+
+    restart_start_time = time.time()
+
+    for container_name in containers_to_restart:
+        try:
+            print(f"  Restarting {container_name}...")
+            container = client.containers.get(container_name)
+            container.restart(timeout=timeout)
+            print(f"  ✓ {container_name} restarted successfully")
+            results[container_name] = True
+
+        except docker.errors.NotFound:
+            print(f"  ⚠ Warning: Container '{container_name}' not found - skipping")
+            results[container_name] = False
+
+        except docker.errors.APIError as e:
+            print(f"  ❌ Error: Failed to restart '{container_name}': {e}")
+            results[container_name] = False
+
+        except Exception as e:
+            print(f"  ❌ Error: Unexpected error restarting '{container_name}': {e}")
+            results[container_name] = False
+
+    restart_time = time.time() - restart_start_time
+
+    # Summary
+    successful_restarts = sum(results.values())
+    total_containers = len(containers_to_restart)
+
+    if successful_restarts == total_containers:
+        print(f"  ✓ All containers restarted successfully in {restart_time:.1f}s")
+    elif successful_restarts > 0:
+        print(f"  ⚠ {successful_restarts}/{total_containers} containers restarted in {restart_time:.1f}s")
+        print(f"    Some containers failed - search results may be affected")
+    else:
+        print(f"  ❌ All container restarts failed in {restart_time:.1f}s")
+        print(f"    Search results will likely be affected by rate limits")
+
+    return results
+
+
+class TeeStream:
+    """A stream that writes to both the original stdout and a capture buffer."""
+
+    def __init__(self, original_stdout, capture_buffer):
+        self.original_stdout = original_stdout
+        self.capture_buffer = capture_buffer
+
+    def write(self, text):
+        """Write to both original stdout and capture buffer."""
+        # Write to original stdout for immediate console display
+        self.original_stdout.write(text)
+        # Write to capture buffer for file saving
+        self.capture_buffer.write(text)
+        return len(text)
+
+    def flush(self):
+        """Flush both streams."""
+        self.original_stdout.flush()
+        self.capture_buffer.flush()
+
+    def __getattr__(self, name):
+        """Delegate any other attribute access to original stdout."""
+        return getattr(self.original_stdout, name)
+
+
 class ConsoleCapture:
-    """Captures console output for checkpointing and logging."""
+    """Captures console output for checkpointing and logging while displaying to console."""
 
     def __init__(self):
         self.buffer = io.StringIO()
         self.original_stdout = sys.stdout
+        self.tee_stream = None
         self.is_capturing = False
 
     def start_capture(self):
-        """Start capturing console output."""
+        """Start capturing console output while displaying to console."""
         if not self.is_capturing:
-            sys.stdout = self.buffer
+            self.tee_stream = TeeStream(self.original_stdout, self.buffer)
+            sys.stdout = self.tee_stream
             self.is_capturing = True
 
     def stop_capture(self):
@@ -272,8 +393,6 @@ class RunManager:
                 # Overall assessment - use score-based if agent config available
                 if agent_config_id:
                     try:
-                        import sys
-                        import os
                         sys.path.append(os.path.dirname(os.path.abspath(__file__)))
                         from config_manager import AgentConfigManager
                         config_manager = AgentConfigManager()
@@ -548,7 +667,7 @@ def run_single_test(
         agent_answer, steps_taken = run_react_loop(
             query,
             agent_client,
-            user_config={"max_steps": max_steps}
+            user_config={"max_steps": max_steps, 'verbosity': VERBOSITY_STANDARD}
         )
         end_time = datetime.now()
 
@@ -1364,7 +1483,9 @@ def run_complete_test(
     list_configs: bool = False,
     list_configs_sorted: bool = False,
     list_runs_sorted: bool = False,
-    list_summary: bool = False
+    list_summary: bool = False,
+    restart_searxng: bool = False,
+    containers_to_restart: List[str] = None
 ) -> None:
     """
     Main function to run complete testing with agent configuration management.
@@ -1390,6 +1511,8 @@ def run_complete_test(
         list_configs_sorted: Whether to list configurations sorted by score
         list_runs_sorted: Whether to list runs sorted by score
         list_summary: Whether to show system performance summary
+        restart_searxng: Whether to restart search containers before each question
+        containers_to_restart: List of container names to restart (default: ["redis", "searxng", "caddy"])
     """
 
     # Initialize managers
@@ -1523,6 +1646,15 @@ def run_complete_test(
 
     print(f"\nLoaded {len(questions)} questions from {questions_file}")
 
+    # Show container restart status
+    if restart_searxng:
+        if containers_to_restart is None:
+            containers_to_restart = ["redis", "searxng", "caddy"]
+        print(f"🔄 Container restart enabled: {', '.join(containers_to_restart)}")
+        print(f"   Containers will be restarted before each question to reset search limits")
+    else:
+        print(f"🔍 Container restart disabled")
+
     # Build clients
     try:
         print("Building agent client...")
@@ -1572,6 +1704,24 @@ def run_complete_test(
             print(f"{'='*60}")
             print(f"Level: {question.get('Level', 'unknown')}")
             print(f"Question: {question['Question'][:200]}{'...' if len(question['Question']) > 200 else ''}")
+
+            # Restart search containers if enabled
+            if restart_searxng:
+                if containers_to_restart is None:
+                    containers_to_restart = ["redis", "searxng", "caddy"]
+
+                restart_results = restart_search_containers(containers_to_restart)
+                successful_restarts = sum(restart_results.values())
+                total_containers = len(containers_to_restart)
+
+                if successful_restarts == total_containers:
+                    print(f"✓ All {total_containers} containers restarted successfully")
+                elif successful_restarts > 0:
+                    print(f"⚠ Warning: Only {successful_restarts}/{total_containers} containers restarted successfully")
+                    print(f"  Search results may be affected by rate limits")
+                else:
+                    print(f"⚠ Warning: All container restarts failed, continuing with test...")
+                    print(f"  Search results will likely be affected by rate limits")
 
             # Run single test
             result = run_single_test(
@@ -1797,11 +1947,22 @@ if __name__ == "__main__":
     #     output_dir="testing/results"
     # )
 
+    # 7. Run with container restart (prevents rate limiting issues)
+    # main(
+    #     questions_file="testing/questions/questions.jsonl",
+    #     use_lmstudio=True,
+    #     max_steps=10,
+    #     restart_searxng=True,  # Restart containers before each question
+    #     containers_to_restart=["redis", "searxng", "caddy"],  # Containers to restart
+    #     agent_config_id="config_001",  # Use specific agent configuration
+    #     limit=None  # Test all questions
+    # )
+
     # Default: Start new run with agent configuration tracking
     main(
         questions_file="testing/questions/questions.jsonl",
         use_lmstudio=True,
-        max_steps=50,
+        max_steps=10,
         limit=None,  # Set to a number to test fewer questions
         show_validation_details=True,
         output_dir="testing/results",
@@ -1813,5 +1974,7 @@ if __name__ == "__main__":
         list_configs=False,  # List configurations (basic)
         list_configs_sorted=False,  # List configurations sorted by score
         list_runs_sorted=False,  # List runs sorted by score
-        list_summary=False  # Show system performance summary
+        list_summary=False,  # Show system performance summary
+        restart_searxng=True,  # Set to True to restart containers before each question
+        containers_to_restart=None  # Use default containers: ["redis", "searxng", "caddy"]
     )

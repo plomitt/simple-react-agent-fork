@@ -6,9 +6,12 @@ Usage:
     poetry run python testing/cli.py list_configs_sorted
     poetry run python testing/cli.py list_runs_sorted
     poetry run python testing/cli.py list_summary
+    poetry run python testing/cli.py --restart-searxng --agent-config-id <config_id>
+    poetry run python testing/cli.py --restart-searxng --containers-to-restart redis,searxng,caddy,nginx
 """
 
 import argparse
+import os
 from testing import run_complete_test
 
 
@@ -20,7 +23,7 @@ def main():
                        help='Path to questions JSONL file')
     parser.add_argument('--use-lmstudio', action='store_true', default=True,
                        help='Use LM Studio (default: True)')
-    parser.add_argument('--max-steps', type=int, default=50,
+    parser.add_argument('--max-steps', type=int, default=10,
                        help='Maximum steps for agent')
     parser.add_argument('--limit', type=int, default=None,
                        help='Limit number of questions to test')
@@ -57,7 +60,19 @@ def main():
                        help='Clean up checkpoint files after completion')
     parser.add_argument('--agent-config-id', help='Specific agent configuration ID to use')
 
+    # Docker container arguments
+    parser.add_argument('--restart-searxng', action='store_true', default=os.getenv('RESTART_SEARCH_CONTAINERS', '').lower() == 'true',
+                       help='Restart search containers before each question to reset search limits (env: RESTART_SEARCH_CONTAINERS)')
+    parser.add_argument('--containers-to-restart', default=os.getenv('CONTAINERS_TO_RESTART', 'redis,searxng,caddy'),
+                       help='Comma-separated list of container names to restart (env: CONTAINERS_TO_RESTART, default: redis,searxng,caddy)')
+
     args = parser.parse_args()
+
+    # Parse containers list
+    containers_to_restart = None
+    if args.restart_searxng:
+        # Split comma-separated list and strip whitespace
+        containers_to_restart = [c.strip() for c in args.containers_to_restart.split(',') if c.strip()]
 
     # Map CLI arguments to function parameters
     kwargs = {
@@ -80,7 +95,9 @@ def main():
         'list_configs': args.list_configs,
         'list_configs_sorted': args.list_configs_sorted,
         'list_runs_sorted': args.list_runs_sorted,
-        'list_summary': args.list_summary
+        'list_summary': args.list_summary,
+        'restart_searxng': args.restart_searxng,
+        'containers_to_restart': containers_to_restart
     }
 
     # Validate create_config arguments

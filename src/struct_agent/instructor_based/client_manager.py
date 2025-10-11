@@ -8,11 +8,15 @@ from struct_agent.instructor_based.utils import merge_configs
 
 def get_openrouter_default_config() -> Dict[str, Any]:
     """Get default configuration for OpenRouter client."""
+    # Use MD_JSON mode for better debugging visibility
+    debug_mode = os.getenv("INSTRUCTOR_DEBUG_MODE", "false").lower() == "true"
+    mode = Mode.MD_JSON if debug_mode else Mode.TOOLS
+
     return {
         "base_url": os.getenv("OPENROUTER_BASE_URL"),
         "api_key": os.getenv("OPENROUTER_API_KEY"),
         "model": os.getenv("OPENROUTER_MODEL_ID"),
-        "mode": Mode.TOOLS,
+        "mode": mode,
     }
 
 def get_lmstudio_default_config() -> Dict[str, Any]:
