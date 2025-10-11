@@ -340,7 +340,7 @@ def run_react_loop(query: str, client: Instructor, user_config: dict = {}) -> st
             "thought": thought_content,
             "action": action_content,
             "observation": observation_content,
-        })
+        })  
 
     print_verbose(verbosity, VERBOSITY_ESSENTIAL, format_reasoning_outline(reasoning_outline))
     print_verbose(verbosity, VERBOSITY_ESSENTIAL, "\n")

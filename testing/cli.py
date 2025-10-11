@@ -8,11 +8,16 @@ Usage:
     poetry run python testing/cli.py list_summary
     poetry run python testing/cli.py --restart-searxng --agent-config-id <config_id>
     poetry run python testing/cli.py --restart-searxng --containers-to-restart redis,searxng,caddy,nginx
+    poetry run python testing/cli.py --manual-mode --agent-config-id <config_id>
+    poetry run python testing/cli.py --manual-mode --restart-searxng --limit 5
 """
 
 import argparse
 import os
-from testing import run_complete_test
+try:
+    from testing import run_complete_test
+except ImportError:
+    from testing.testing import run_complete_test
 
 
 def main():
@@ -66,6 +71,10 @@ def main():
     parser.add_argument('--containers-to-restart', default=os.getenv('CONTAINERS_TO_RESTART', 'redis,searxng,caddy'),
                        help='Comma-separated list of container names to restart (env: CONTAINERS_TO_RESTART, default: redis,searxng,caddy)')
 
+    # Manual mode argument
+    parser.add_argument('--manual-mode', action='store_true', default=os.getenv('MANUAL_MODE', '').lower() == 'true',
+                       help='Enable manual validation mode to review and override validator decisions (env: MANUAL_MODE)')
+
     args = parser.parse_args()
 
     # Parse containers list
@@ -97,7 +106,8 @@ def main():
         'list_runs_sorted': args.list_runs_sorted,
         'list_summary': args.list_summary,
         'restart_searxng': args.restart_searxng,
-        'containers_to_restart': containers_to_restart
+        'containers_to_restart': containers_to_restart,
+        'manual_mode': args.manual_mode
     }
 
     # Validate create_config arguments

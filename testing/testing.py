@@ -16,7 +16,10 @@ import docker
 
 from struct_agent.instructor_based.new_agent import VERBOSITY_STANDARD, run_react_loop
 from struct_agent.instructor_based.client_manager import build_client
-from config_manager import AgentConfigManager
+try:
+    from testing.config_manager import AgentConfigManager
+except ImportError:
+    from config_manager import AgentConfigManager
 
 
 # Docker Container Restart Feature
@@ -1463,6 +1466,194 @@ def select_run_to_resume_interactive(run_manager: RunManager) -> Optional[str]:
             print("Invalid input. Please enter a number or 'q'.")
 
 
+def display_manual_validation(
+    question_data: Dict[str, Any],
+    result: Dict[str, Any]
+) -> None:
+    """
+    Display validation results for manual review.
+
+    Args:
+        question_data: Original question data
+        result: Test result containing agent answer and validation
+    """
+    print("\n" + "="*80)
+    print("MANUAL VALIDATION REVIEW")
+    print("="*80)
+
+    # Display question info
+    print(f"\n📋 QUESTION {str(question_data.get('Level', 'Unknown')).upper()}")
+    print(f"Question: {question_data['Question']}")
+    print(f"Task ID: {question_data.get('task_id', 'Unknown')}")
+
+    # Display agent answer
+    print(f"\n🤖 AGENT'S ANSWER:")
+    if result['success']:
+        print(f"{result['agent_answer']}")
+        print(f"Steps taken: {result['steps_taken']}")
+        print(f"Execution time: {result['execution_time']:.2f}s")
+    else:
+        print(f"❌ AGENT FAILED: {result.get('error', 'Unknown error')}")
+        print(f"Failure type: {result.get('failure_type', 'Unknown')}")
+        if result.get('steps_taken'):
+            print(f"Steps taken: {result['steps_taken']}")
+        if result.get('execution_time'):
+            print(f"Execution time: {result['execution_time']:.2f}s")
+
+    # Display expected answer
+    print(f"\n✅ EXPECTED ANSWER:")
+    print(f"{question_data['Final answer']}")
+
+    # Display validator decision
+    print(f"\n🔍 VALIDATOR DECISION:")
+    if result['success'] and result.get('validation_reasoning'):
+        is_correct = result['is_correct']
+        status = "CORRECT" if is_correct else "INCORRECT"
+        status_emoji = "✅" if is_correct else "❌"
+        print(f"{status_emoji} Status: {status}")
+        print(f"Reasoning: {result['validation_reasoning']}")
+    else:
+        print("⚠️ No validation performed (agent failed)")
+
+    print("\n" + "="*80)
+
+
+def get_manual_decision() -> str:
+    """
+    Get user's decision for manual validation mode.
+
+    Returns:
+        User's choice: 'overwrite', 'redo', 'continue', or 'quit'
+    """
+    print("\n🎯 MANUAL VALIDATION OPTIONS:")
+    print("1. 📝 Overwrite validator's decision")
+    print("2. 🔄 Redo current question")
+    print("3. ⏭️  Continue to next question")
+    print("4. 🚪 Quit testing")
+
+    while True:
+        try:
+            choice = input("\nEnter your choice (1-4): ").strip()
+
+            if choice == '1':
+                return 'overwrite'
+            elif choice == '2':
+                return 'redo'
+            elif choice == '3':
+                return 'continue'
+            elif choice == '4':
+                return 'quit'
+            else:
+                print("Invalid choice. Please enter 1, 2, 3, or 4.")
+        except (EOFError, KeyboardInterrupt):
+            print("\n\n⚠️ Input interrupted. Continuing to next question...")
+            return 'continue'
+
+
+def handle_overwrite_validation(result: Dict[str, Any]) -> bool:
+    """
+    Handle user overwriting the validator's decision.
+
+    Args:
+        result: Test result to modify
+
+    Returns:
+        New is_correct value chosen by user
+    """
+    current_status = "CORRECT" if result['is_correct'] else "INCORRECT"
+    print(f"\n📝 Current validator decision: {current_status}")
+
+    while True:
+        try:
+            choice = input("Mark as (c)orrect, (i)ncorrect, or (esc)ape: ").strip().lower()
+
+            if choice in ['c', 'correct']:
+                print("✅ Marked as CORRECT")
+                result['is_correct'] = True
+                result['validation_reasoning'] = "Manually marked as correct by user"
+                return True
+            elif choice in ['i', 'incorrect']:
+                print("❌ Marked as INCORRECT")
+                result['is_correct'] = False
+                result['validation_reasoning'] = "Manually marked as incorrect by user"
+                return False
+            elif choice in ['esc', 'escape', '']:
+                print("↩️ Keeping validator's original decision")
+                return result['is_correct']
+            else:
+                print("Invalid choice. Please enter 'c', 'i', or 'esc'.")
+        except (EOFError, KeyboardInterrupt):
+            print("\n↩️ Keeping validator's original decision")
+            return result['is_correct']
+
+
+def handle_redo_question(
+    question_data: Dict[str, Any],
+    agent_client,
+    validation_client,
+    max_steps: int
+) -> Dict[str, Any]:
+    """
+    Re-run a question with the same parameters.
+
+    Args:
+        question_data: Question data to retry
+        agent_client: Agent client for running the test
+        validation_client: Validation client
+        max_steps: Maximum steps for agent
+
+    Returns:
+        New test result
+    """
+    print("\n🔄 Re-running question...")
+
+    # Run the test again
+    new_result = run_single_test(
+        question_data=question_data,
+        agent_client=agent_client,
+        validation_client=validation_client,
+        max_steps=max_steps
+    )
+
+    print(f"✅ Question re-run completed")
+    return new_result
+
+
+def toggle_searxng_restart(current_setting: bool) -> bool:
+    """
+    Toggle searxng restart setting during manual mode.
+
+    Args:
+        current_setting: Current restart_searxng setting
+
+    Returns:
+        New restart setting
+    """
+    status = "ENABLED" if current_setting else "DISABLED"
+    print(f"\n🔧 Searxng restart is currently {status}")
+
+    while True:
+        try:
+            choice = input("Toggle restart? (y/n/current): ").strip().lower()
+
+            if choice in ['y', 'yes']:
+                new_setting = not current_setting
+                new_status = "ENABLED" if new_setting else "DISABLED"
+                print(f"🔧 Searxng restart {new_status}")
+                return new_setting
+            elif choice in ['n', 'no', 'current']:
+                print(f"🔧 Keeping current setting ({status})")
+                return current_setting
+            elif choice == '':
+                print(f"🔧 Keeping current setting ({status})")
+                return current_setting
+            else:
+                print("Invalid choice. Please enter 'y', 'n', or just press Enter.")
+        except (EOFError, KeyboardInterrupt):
+            print(f"\n🔧 Keeping current setting ({status})")
+            return current_setting
+
+
 def run_complete_test(
     questions_file: str,
     use_lmstudio: bool = True,
@@ -1485,7 +1676,8 @@ def run_complete_test(
     list_runs_sorted: bool = False,
     list_summary: bool = False,
     restart_searxng: bool = False,
-    containers_to_restart: List[str] = None
+    containers_to_restart: List[str] = None,
+    manual_mode: bool = False
 ) -> None:
     """
     Main function to run complete testing with agent configuration management.
@@ -1513,6 +1705,7 @@ def run_complete_test(
         list_summary: Whether to show system performance summary
         restart_searxng: Whether to restart search containers before each question
         containers_to_restart: List of container names to restart (default: ["redis", "searxng", "caddy"])
+        manual_mode: Whether to enable manual validation mode where user can review and override validation decisions
     """
 
     # Initialize managers
@@ -1655,6 +1848,13 @@ def run_complete_test(
     else:
         print(f"🔍 Container restart disabled")
 
+    # Show manual mode status
+    if manual_mode:
+        print(f"🖱️  Manual validation mode ENABLED")
+        print(f"   You can review and override validation decisions after each question")
+    else:
+        print(f"🤖 Automatic validation mode")
+
     # Build clients
     try:
         print("Building agent client...")
@@ -1732,6 +1932,39 @@ def run_complete_test(
             )
 
             results.append(result)
+
+            # Handle manual mode if enabled
+            if manual_mode:
+                while True:
+                    # Display validation results for manual review
+                    display_manual_validation(question, result)
+
+                    # Get user's decision
+                    decision = get_manual_decision()
+
+                    if decision == 'overwrite':
+                        # Handle overwriting the validator's decision
+                        handle_overwrite_validation(result)
+                        break
+                    elif decision == 'redo':
+                        # Re-run the current question
+                        result = handle_redo_question(
+                            question, agent_client, validation_client, max_steps
+                        )
+                        # Replace the last result in results list
+                        results[-1] = result
+                        continue  # Show the new result for review
+                    elif decision == 'continue':
+                        # Continue to next question
+                        break
+                    elif decision == 'quit':
+                        # Exit testing early
+                        print("\n🚪 Exiting testing as requested by user...")
+                        raise KeyboardInterrupt()
+
+                # Offer option to toggle searxng restart
+                if restart_searxng:
+                    restart_searxng = toggle_searxng_restart(restart_searxng)
 
             # Print result summary
             status = "✓ SUCCESS" if result['success'] else "✗ FAILED"
