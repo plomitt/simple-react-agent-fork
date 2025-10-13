@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from leann import LeannBuilder, LeannSearcher, LeannChat
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv

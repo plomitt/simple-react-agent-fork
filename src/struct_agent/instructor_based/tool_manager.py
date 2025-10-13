@@ -1,7 +1,6 @@
 from __future__ import annotations
-from typing import Any, Callable, Dict, Mapping, Optional, Tuple, Type, Union
-from types import MappingProxyType
-from typing_extensions import List
+
+from typing import Any, Callable, Dict, Optional, Type
 from pydantic import BaseModel
 
 class ToolSpec(BaseModel):
@@ -24,54 +23,4 @@ class ToolSpec(BaseModel):
             raise ValueError("ToolSpec requires response_model or args_model")
         return model
 
-class ToolRegistry:
-    """Store tools and help the agent resolve tool calls."""
-
-    def __init__(self) -> None:
-        self._tools: Dict[str, ToolSpec] = {}
-
-    def add(self, tool: ToolSpec) -> None:
-        """Register or replace a tool."""
-        self._tools[tool.name] = tool
-
-    def remove(self, name: str) -> None:
-        """Remove a tool without raising if it is missing."""
-        self._tools.pop(name, None)
-
-    def as_mapping(self) -> Mapping[str, ToolSpec]:
-        """Expose a read-only view for prompt rendering."""
-        return MappingProxyType(self._tools)
-
-    def has_tools(self) -> bool:
-        """Return True when at least one tool is registered."""
-        return bool(self._tools)
-
-    def response_union(self) -> Type[BaseModel]:
-        """Return the correct Pydantic response union for the current tool set."""
-        if not self._tools:
-            raise RuntimeError("No tools registered")
-        models = [spec.model_class() for spec in self._tools.values()]
-        return models[0] if len(models) == 1 else Union[*models]
-
-    def tool_names(self) -> List[str]:
-        """Return the names of all registered tools."""
-        return list(self._tools.keys())
-
-    def tool_names_and_descriptions(self) -> List[str]:
-        """Return the names and descriptions of all registered tools as list of strings."""
-        return "\n".join([f"{name}: {spec.description}" for name, spec in self._tools.items()])
-
-    def resolve(self, payload: BaseModel) -> Tuple[str, ToolSpec]:
-        """Identify which tool produced the payload."""
-        for name, spec in self._tools.items():
-            if isinstance(payload, spec.model_class()):
-                return name, spec
-        raise ValueError("Received tool payload that matches no registered tool")
-
-__all__ = ["ToolRegistry", "ToolSpec"]
-
-if __name__ == "__main__":
-    tools = ToolRegistry()
-    tools.add(ToolSpec(name="tool1", description="Tool 1", response_model=None, handler=lambda x: x, args_model=None, parameters=None))
-    tools.add(ToolSpec(name="tool2", description="Tool 2", response_model=None, handler=lambda x: x, args_model=None, parameters=None))
-    print(tools.tool_names_and_descriptions())
+__all__ = ["ToolSpec"]

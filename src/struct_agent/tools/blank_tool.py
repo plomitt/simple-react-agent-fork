@@ -1,13 +1,13 @@
-from typing import Dict, Any
+from __future__ import annotations
+
 from pydantic import BaseModel, Field
+from typing import Dict, Any
 
 from struct_agent.instructor_based import ToolSpec
-
 
 class BlankTool(BaseModel):
     """Inputs for the blank tool - no actual parameters needed."""
     message: str = Field(default="", description="Optional message (ignored but kept for consistency)")
-
 
 def make_blank_tool() -> ToolSpec:
     """Create a blank tool that does nothing but returns success."""

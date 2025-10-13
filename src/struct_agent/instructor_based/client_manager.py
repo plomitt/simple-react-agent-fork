@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from instructor import Instructor, Mode
 from typing import Optional, Dict, Any
 from openai import OpenAI

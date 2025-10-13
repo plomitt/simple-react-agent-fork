@@ -6,10 +6,10 @@ from instructor import Instructor
 from dotenv import load_dotenv
 
 from struct_agent.instructor_based.prompt_manager import get_action_prompt, get_reasoning_prompt, get_thought_prompt
-from struct_agent.instructor_based.reasoning_modules import NextAction, ReasoningStep, ReasoningSteps
+from struct_agent.instructor_based.utils import merge_configs, print_step_info
+from struct_agent.instructor_based.reasoning_modules import ReasoningSteps
 from struct_agent.instructor_based.client_manager import build_client
 from struct_agent.instructor_based.tool_manager import ToolSpec
-from struct_agent.instructor_based.utils import merge_configs
 
 from struct_agent.tools.searxng_tools import make_searxng_search_tool
 from struct_agent.tools.blank_tool import make_blank_tool
@@ -59,17 +59,6 @@ def summarize_action(action_name: str, action_args: Dict[str, Any]) -> str:
     formatted_args = ", ".join(f"{key}={value}" for key, value in action_args.items())
     return f"{action_name}({formatted_args})"
 
-def filter_reasoning_steps_after_reset(reasoning_steps: List[ReasoningStep]) -> List[ReasoningStep]:
-    last_reset_index = -1
-
-    for i, step in enumerate(reasoning_steps):
-        if step.next_action == NextAction.RESET:
-            last_reset_index = i
-
-    if last_reset_index >= 0:
-        return reasoning_steps[last_reset_index + 1:]
-    return reasoning_steps
-
 def generate_tought(query, topic, history, client: Instructor) -> str:
     history_text = "\n".join(history) if history else "No previous steps."
     user_payload = (
@@ -92,13 +81,14 @@ def generate_tought(query, topic, history, client: Instructor) -> str:
 
     steps = thought.reasoning_steps
 
+    error_message = "No structured reasoning returned."
     if not steps:
-        return "No structured reasoning returned."
+        return error_message
 
     final_step = steps[-1]
-    return final_step.reasoning or final_step.action or "No structured reasoning returned."
+    return final_step.reasoning or final_step.action or error_message
 
-def run_react_loop(query: str, client: Instructor, user_config: dict = {}) -> str:
+def run_react_loop(query: str, client: Instructor, user_config: Dict[str, Any] = {}) -> str:
     """Run the ReAct loop until the agent returns a final answer."""
 
     # Configure
@@ -107,17 +97,17 @@ def run_react_loop(query: str, client: Instructor, user_config: dict = {}) -> st
 
     default_config = {
         'max_steps': 10,
-        'tools': [searxng_tool, blank_tool]
+        'tools': [searxng_tool],
+        'verbose': False
     }
 
     config = merge_configs(user_config, default_config)
 
-    tools: List[ToolSpec] = config['tools']
+    tools: List[ToolSpec] = config['tools'] + [blank_tool]
     history: List[str] = []
 
     # Run loop
     for step_num in range(config['max_steps']):
-
         # Think
         is_last_step = step_num == config['max_steps'] - 1
         messages = get_thought_messages(tools, query, history, is_last_step)
@@ -163,11 +153,22 @@ def run_react_loop(query: str, client: Instructor, user_config: dict = {}) -> st
         history.append(f"Action: {action_content}")
         history.append(f"Observation: {observation_content}")
 
+        # Print
+        if config['verbose']:
+            print_step_info(step_num, thought, action_content, observation_content)
+
     return f"Max steps ({config['max_steps']}) reached before final answer."
+
+__all__ = ["run_react_loop", "generate_tought"]
 
 if __name__ == "__main__":
     query = "What is the weather in the capital of France, and what is that city known for?"
 
+    config = {
+        'max_steps': 5,
+        'tools': [],
+        'verbose': True}
+
     client = build_client()
-    answer = run_react_loop(query, client)
+    answer = run_react_loop(query, client, config)
     print("\nFinal Answer:", answer)

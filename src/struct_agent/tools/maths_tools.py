@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from sympy import sympify, solve, simplify, diff, integrate, Matrix, expand, factor
 from typing import Dict, Any, Optional, List
 from pydantic import BaseModel, Field

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from struct_agent.tools.searxng_tools import *
 from struct_agent.tools.maths_tools import *
 from struct_agent.tools.leann_tools import *
