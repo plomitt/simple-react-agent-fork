@@ -1,5 +1,4 @@
 from struct_agent.tools.searxng_tools import *
-from struct_agent.tools.playwright_search_tools import *
 from struct_agent.tools.maths_tools import *
 from struct_agent.tools.leann_tools import *
 
@@ -36,12 +35,6 @@ class MetaSearchToolkit(BaseToolkit):
         make_searxng_search_tool,
     ]
 
-class PlaywrightSearchToolkit(BaseToolkit):
-    """Toolkit for performing reliable web searches with Playwright browser automation."""
-    TOOL_FACTORIES = [
-        make_playwright_search_tool,
-    ]
-
 class VectorIndexToolkit(BaseToolkit):
     """Toolkit for vector indexing and semantic search operations using LEANN."""
     TOOL_FACTORIES = [
@@ -54,12 +47,11 @@ __all__ = [
     'BaseToolkit',
     'MathsToolkit',
     'MetaSearchToolkit',
-    'PlaywrightSearchToolkit',
     'VectorIndexToolkit',
 ]
 
 if __name__ == "__main__":
-    for toolkit in [MathsToolkit(), MetaSearchToolkit(), PlaywrightSearchToolkit(), VectorIndexToolkit()]:
+    for toolkit in [MathsToolkit(), MetaSearchToolkit(), VectorIndexToolkit()]:
         print(f"{toolkit.__class__.__name__}")
         for tool in toolkit:
             print(f"    {tool.name}")
