@@ -40,7 +40,79 @@ Web search and meta-search capabilities using SearXNG.
 **Available Functions:**
 - `make_searxng_search_tool()`: Web search with SearXNG
 
-### 3. LEANN Tools (`leann_tools.py`)
+### 3. Playwright Search Tools (`playwright_search_tools.py`)
+
+Reliable web search capabilities using Playwright browser automation. This tool provides robust web search functionality by directly controlling a web browser, bypassing many of the rate limiting and reliability issues associated with API-based search tools.
+
+**Features:**
+- Browser-based web automation for reliable search results
+- Multiple search engine support (Google, Bing, DuckDuckGo)
+- Real-time search result extraction from live SERP pages
+- Anti-bot detection measures with realistic browser fingerprints
+- Automatic result deduplication and ranking
+- Configurable timeouts and result limits
+- Robust error handling and fallback mechanisms
+
+**Available Functions:**
+- `make_playwright_search_tool()`: Web search with Playwright automation
+- `playwright_search_sync()`: Direct search function
+- `search_with_playwright()`: Core search implementation
+- `create_search_engine()`: Search engine factory function
+
+**Usage Example:**
+```python
+from struct_agent.tools.playwright_search_tools import playwright_search_sync
+
+# Perform web search with real-time results
+results = playwright_search_sync(
+    queries=["current weather in Paris", "Python programming"],
+    search_engine="google",
+    max_results=5,
+    timeout=20
+)
+
+print(f"Found {results['total_results']} results from {results['total_queries']} queries")
+for result in results['results']:
+    print(f"  {result['title']}: {result['url']}")
+    print(f"    {result['content'][:100]}...")
+```
+
+### 4. Chrome DevTools Search Tools (`chrome_devtools_search_tools.py`)
+
+Web search capabilities using Chrome DevTools automation to avoid rate limiting issues.
+
+**Features:**
+- Browser-based web search automation
+- Multiple search engine support (Google, DuckDuckGo, Bing)
+- Bot detection bypass using realistic browser headers
+- Fallback results when search is blocked
+- Asynchronous search operations
+- Configurable timeouts and result limits
+
+**Available Functions:**
+- `make_chrome_devtools_search_tool()`: Web search with Chrome DevTools automation
+- `chrome_devtools_search()`: Direct search function
+- `chrome_devtools_search_async()`: Async search function
+
+**Usage Example:**
+```python
+from struct_agent.tools.chrome_devtools_search_tools import chrome_devtools_search
+
+# Perform web search
+results = chrome_devtools_search(
+    queries=["python web scraping", "machine learning"],
+    search_engine="google",
+    max_results=5
+)
+
+for response in results:
+    print(f"Query: {response['query']}")
+    print(f"Results: {response['total_results']}")
+    for result in response['results']:
+        print(f"  {result['title']}: {result['url']}")
+```
+
+### 5. LEANN Tools (`leann_tools.py`)
 
 Vector indexing and semantic search using LEANN (The smallest vector index in the world).
 
@@ -56,13 +128,15 @@ Vector indexing and semantic search using LEANN (The smallest vector index in th
 - `make_leann_search_tool()`: Search vector index
 - `make_leann_chat_tool()`: Chat with indexed content
 
-### 4. Toolkits (`toolkits.py`)
+### 6. Toolkits (`toolkits.py`)
 
 Pre-configured tool bundles for common use cases.
 
 **Available Toolkits:**
 - `MathsToolkit`: Complete mathematical operations bundle
-- `MetaSearchToolkit`: Web search capabilities
+- `MetaSearchToolkit`: SearXNG web search capabilities
+- `PlaywrightSearchToolkit`: Playwright browser automation web search capabilities
+- `ChromeDevToolsSearchToolkit`: Chrome DevTools web search capabilities
 - `VectorIndexToolkit`: Vector indexing and search bundle
 
 ## Installation
@@ -143,6 +217,7 @@ poetry run python -m struct_agent.tools.maths_tools
 
 # Run search tools
 poetry run python -m struct_agent.tools.searxng_tools
+poetry run python -m struct_agent.tools.playwright_search_tools
 
 # Run LEANN tools
 poetry run python -m struct_agent.tools.leann_tools
@@ -199,6 +274,41 @@ result = search_tool.handler({
 print(f"Found {len(result['results'])} results")
 for item in result['results'][:3]:
     print(f"- {item['title']}: {item['url']}")
+```
+
+### Playwright Search Tools
+```python
+from struct_agent.tools.playwright_search_tools import make_playwright_search_tool
+
+# Create search tool
+search_tool = make_playwright_search_tool()
+
+# Perform reliable web search with real-time results
+result = search_tool.handler({
+    "queries": ["current weather in Paris", "latest AI developments"],
+    "search_engine": "google",
+    "max_results": 5,
+    "timeout": 20
+})
+
+print(f"Found {result['total_results']} results from {result['total_queries']} queries")
+for item in result['results']:
+    print(f"- {item['title']}: {item['url']}")
+    if item.get('content'):
+        print(f"  {item['content'][:100]}...")
+
+# Use different search engines
+bing_result = search_tool.handler({
+    "queries": ["Python machine learning libraries"],
+    "search_engine": "bing",
+    "max_results": 3
+})
+
+duckduckgo_result = search_tool.handler({
+    "queries": ["quantum computing basics"],
+    "search_engine": "duckduckgo",
+    "max_results": 3
+})
 ```
 
 ### LEANN Vector Tools
@@ -299,6 +409,8 @@ poetry run python -m struct_agent.tools.searxng_tools
 - `ddgs`: DuckDuckGo search (searxng_tools)
 - `leann>=0.3.4`: Vector indexing and search (leann_tools)
 - `aiohttp`: Async HTTP client (searxng_tools)
+- `playwright>=1.40`: Browser automation for web search (playwright_search_tools)
+- `pytest-playwright`: Playwright integration for testing (test dependencies)
 - `requests`: HTTP requests (various tools)
 
 ## Error Handling
@@ -389,6 +501,32 @@ if "error" in result:
    # Test expression parsing
    import ast
    ast.parse("2 + 2", mode="eval")
+   ```
+
+6. **Playwright Browser Issues**: Ensure browsers are installed
+   ```bash
+   # Install Playwright browsers
+   poetry run playwright install
+
+   # Install specific browsers
+   poetry run playwright install chromium
+
+   # Test browser launch
+   poetry run python -c "
+   from playwright.sync_api import sync_playwright
+   with sync_playwright() as p:
+       browser = p.chromium.launch()
+       print('Browser launched successfully')
+       browser.close()
+   "
+   ```
+
+7. **Playwright Search Failures**: Check network connectivity and search engine accessibility
+   ```python
+   # Test search engine accessibility
+   import requests
+   response = requests.get('https://www.google.com', timeout=10)
+   print(f"Google status: {response.status_code}")
    ```
 
 ## Examples

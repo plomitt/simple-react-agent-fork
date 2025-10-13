@@ -11,6 +11,7 @@ from struct_agent.instructor_based.reasoning_prompt import get_reasoning_prompt
 from struct_agent.instructor_based.client_manager import build_client
 from struct_agent.instructor_based.tool_manager import ToolSpec
 from struct_agent.instructor_based.utils import merge_configs
+from struct_agent.tools.blank_tool import make_blank_tool
 from struct_agent.tools.searxng_tools import make_searxng_search_tool
 
 load_dotenv()
@@ -83,15 +84,6 @@ def resolve_tool(payload: ToolSpec, tools: List[ToolSpec]) -> ToolSpec:
             return tool
     return None
 
-def get_reasoning_text(reasoning_steps: List[ReasoningStep]) -> str:
-    return "\n".join([
-        f"\nStep {i+1}: {step.title or 'Untitled'}" +
-        (f"\n  Action: {step.action}" if step.action else "") +
-        (f"\n  Result: {step.result}" if step.result else "") +
-        (f"\n  Reasoning: {step.reasoning}" if step.reasoning else "")
-        for i, step in enumerate(reasoning_steps or [])
-    ]) 
-
 def get_messages(system_prompt: str, query: str, history: List[str] = []) -> List[dict]:
     return [
         {"role": "system", "content": system_prompt},
@@ -112,9 +104,10 @@ def get_thought_messages(_tools: List[ToolSpec], query: str, history: List[str] 
             "You are an agent that uses a Thought → Action → Observation loop.\n"
             "Your goal is to gather information to answer the user's question.\n\n"
             "IMPORTANT GUIDELINES:\n"
-            "1. Call FinalAnswer ONLY when you have sufficient information to provide a complete answer\n"
+            "1. Call FinalAnswer when you have sufficient information to provide a complete answer\n"
             "2. Call ThoughtTopic to continue thinking and gathering more information\n"
             "3. Do not call FinalAnswer prematurely - ensure you have enough context\n\n"
+            "4. At the same time, do not hesitate to call FinalAnswer when needed. Do not call ThoughtTopic indefinitely.\n"
             "Response models available:\n"
             "- FinalAnswer: Use when ready to provide the final answer\n"
             "- ThoughtTopic: Use to continue the reasoning process\n"
@@ -126,7 +119,15 @@ def get_action_messages(tools: List[ToolSpec], query: str, history: List[str] = 
     system_prompt = (
         "You are an agent that uses a Thought → Action → Observation loop.\n"
         f"Available tools: {tool_names_and_descriptions(tools)}.\n"
-        "Based on the latest Thought, perform the next Action by calling one appropriate tool.\n"
+        "Based on the latest Thought, perform the next Action by calling one appropriate tool.\n\n"
+        "CRITICAL GUIDELINES TO AVOID REPETITION:\n"
+        "1. CAREFULLY review the History section to see what tools have already been called and their results\n"
+        "2. NEVER repeat calling tools that have already been called with the same or similar arguments\n"
+        "3. If previous tool calls have provided sufficient information to answer the user's question, proceed to BlankTool\n"
+        "instead of making more tool calls\n"
+        "4. Only call a tool if you need NEW information that hasn't been obtained from previous calls\n"
+        "5. If you cannot find a useful tool to call, use the BlankTool which does nothing and returns success\n"
+        "6. Each tool call should build upon previous observations, not duplicate them"
     )
 
     return get_messages(system_prompt, query, history)
@@ -218,10 +219,11 @@ def run_react_loop(query: str, client: Instructor, user_config: dict = {}) -> st
 
     # Configure
     searxng_tool = make_searxng_search_tool()
+    blank_tool = make_blank_tool()
 
     default_config = {
         'max_steps': 10,
-        'tools': [searxng_tool],
+        'tools': [searxng_tool, blank_tool],
         'verbosity': VERBOSITY_STANDARD  # Default to standard verbosity
     }
 
@@ -340,7 +342,7 @@ def run_react_loop(query: str, client: Instructor, user_config: dict = {}) -> st
             "thought": thought_content,
             "action": action_content,
             "observation": observation_content,
-        })  
+        })
 
     print_verbose(verbosity, VERBOSITY_ESSENTIAL, format_reasoning_outline(reasoning_outline))
     print_verbose(verbosity, VERBOSITY_ESSENTIAL, "\n")
